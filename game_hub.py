@@ -1188,3 +1188,56 @@ class GameHub:
             self._draw_pong(canvas)
         elif self.mode == "snake":
             self._draw_snake(canvas)
+
+
+
+def run_self_test() -> None:
+    """Deterministic smoke test for the non-rendering game logic."""
+
+    # Tic-Tac-Toe: Buddy must block an immediate X win.
+    hub = GameHub()
+    hub.ttt_board = [
+        "X", "X", "",
+        "O", "", "",
+        "", "O", "",
+    ]
+    hub._buddy_tic_move()
+    assert hub.ttt_board[2] == "O", "Tic-Tac-Toe AI failed to block"
+
+    # Menu: bottom-right tile must emit the OLED action.
+    hub = GameHub()
+    hub.open()
+    hub.handle_touch("down", 0.75, 0.75)
+    hub.handle_touch("up", 0.75, 0.75)
+    assert hub.consume_action() == "oled_show", "OLED menu action failed"
+
+    # Pong: several seconds of simulation must stay inside numeric bounds.
+    hub = GameHub()
+    hub._start_pong()
+    now = hub.pong_last
+    for _ in range(240):
+        now += 1.0 / 30.0
+        hub.pong_user_x = hub.pong_ball_x
+        hub._update_pong(now)
+        assert 0.0 <= hub.pong_ball_x <= 1.0, "Pong ball escaped X bounds"
+        assert -0.56 <= hub.pong_vx <= 0.56, "Pong X velocity invalid"
+        assert -0.65 <= hub.pong_vy <= 0.65, "Pong Y velocity invalid"
+
+    # Snake: food directly ahead must grow the snake and increase score.
+    hub = GameHub()
+    hub._start_snake()
+    head_x, head_y = hub.snake[0]
+    hub.snake_food = (head_x + 1, head_y)
+    hub.snake_last_step = 0.0
+    hub._update_snake(10.0)
+    assert hub.snake_score == 1, "Snake did not score on food"
+    assert len(hub.snake) == 4, "Snake did not grow"
+
+    print("Game Hub self-test: PASS")
+
+
+if __name__ == "__main__":
+    import sys
+
+    if "--self-test" in sys.argv:
+        run_self_test()
