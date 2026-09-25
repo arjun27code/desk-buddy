@@ -1427,8 +1427,49 @@ class RoboEyesFace:
     def update(self, now: float) -> None:
         s = self.state
 
-        if s.mood_name != "idle" and now >= s.mood_until:
+        if s.sleeping:
+            s.eye_l_h_next = 1.0
+            s.eye_r_h_next = 1.0
+            s.eye_l_open = False
+            s.eye_r_open = False
+            s.tilt_x += (s.tilt_target_x - s.tilt_x) * 0.05
+            s.tilt_y += (s.tilt_target_y - s.tilt_y) * 0.05
+            self.scenes.update(now, allow_random=False, sleeping=True)
+            return
+
+        if s.mood_name == "sleepy" and now >= s.mood_until:
+            if random.random() < 0.42:
+                self.go_to_sleep()
+                return
             self.set_emotion("idle")
+        elif s.mood_name != "idle" and now >= s.mood_until:
+            self.set_emotion("idle")
+
+        if (
+            s.mood_name == "idle"
+            and s.manual_until == 0.0
+            and now >= s.next_sleep
+            and now >= s.wave_until
+        ):
+            self.go_to_sleep()
+            return
+
+        self.scenes.update(
+            now,
+            allow_random=s.mood_name == "idle" and s.manual_until == 0.0,
+            sleeping=False,
+        )
+
+        if s.mood_name == "idle" and self.scenes.current:
+            if self.scenes.current in {"bike", "car"}:
+                self.set_position("DEFAULT")
+                s.curious = False
+            elif self.scenes.current == "park":
+                self.set_position("S")
+                s.curious = False
+            elif self.scenes.current == "rainbow":
+                self.set_position("N")
+                s.curious = True
 
         if (
             s.mood_name == "idle"
