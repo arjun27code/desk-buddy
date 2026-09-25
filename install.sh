@@ -9,8 +9,7 @@ if [ -z "${PREFIX:-}" ]; then
 fi
 
 if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
-  echo "Python is not installed."
-  echo "Installing the Termux python package..."
+  echo "Installing Python..."
   pkg install python -y
 fi
 
@@ -20,8 +19,8 @@ else
   PYTHON_BIN="python3"
 fi
 
-echo "Checking Desk Buddy server..."
-"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/server.py"
+echo "Checking Desk Buddy..."
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
 chmod +x "$PROJECT_DIR/start.sh"
 
@@ -37,12 +36,14 @@ chmod +x "$LAUNCHER"
 
 echo
 echo "Desk Buddy installed."
-echo "Start it anytime with:"
+echo "No browser. No localhost. It runs directly on the Termux screen."
 echo
+echo "Start:"
 echo "  desk-buddy"
 echo
-echo "Optional battery integration:"
-echo "  1. Install the Termux:API companion app from the same source as Termux."
-echo "  2. Run: pkg install termux-api"
+echo "Optional weather fallback city:"
+echo "  desk-buddy --set-city \"Your City\""
 echo
-echo "Weather works through your browser location permission."
+echo "Optional phone battery/location reactions need the Termux:API companion app"
+echo "and this Termux package:"
+echo "  pkg install termux-api"
