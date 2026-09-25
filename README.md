@@ -2,41 +2,80 @@
 
 Phone-first Desk Buddy powered by Termux.
 
-The default version now uses a native Android pixel surface through Termux:GUI. It is not a website and does not use localhost or a browser.
+The default version uses a native Android pixel surface through Termux:GUI. It is not a website and does not use localhost or a browser.
 
-## Why the renderer changed
+## Native face
 
-A terminal is built from character cells. That is fine for proving the behavior loop, but it cannot produce genuinely smooth RoboEyes-style curves.
+The eye geometry follows the FluxGarage RoboEyes style:
 
-The default renderer now uses a shared pixel buffer through Termux:GUI so the face can be drawn like an OLED robot display.
+- 128x64 virtual OLED geometry
+- 36x36 default eyes
+- 10 px gap
+- 8 px corner radius
+- smooth RoboEyes-style current-to-next geometry transitions
+- auto blinking
+- random idle repositioning
+- curiosity eye stretching
+- happy, tired and angry eyelid overlays
 
-## Native face behavior
+## Emotions
 
-- bright rounded cyan RoboEyes-style eyes
-- no giant rectangular pupils
-- soft cyan glow
-- smooth whole-eye idle movement
-- touch-follow gaze
-- natural auto blinking
-- occasional double blink
-- happy laugh/bounce
-- curious upper-corner gaze
-- annoyed angular eyelids plus horizontal flicker
-- sad/tired downward gaze
-- emotions auto-return to idle after 2.5 seconds
-- tap the face to cycle:
-  happy -> curious -> annoyed -> sad
+A quick tap cycles through:
 
-The behavior is based on the same ideas used by FluxGarage RoboEyes: configurable rounded eye geometry, auto-blinking, idle repositioning, curiosity, moods and one-shot expression animation.
+    happy
+    curious
+    annoyed
+    sad
+    surprised
+    sleepy
+    love
+    excited
+
+Non-idle emotions now stay active for about 5.5 seconds before returning to idle.
+
+Each emotion has its own transition and visual behavior:
+
+- Happy: smooth happy eyelids, laugh bounce and fireworks
+- Curious: slides toward the upper corner with sparkle effects
+- Annoyed: angry eyelids, horizontal shake and stress streaks
+- Sad: slow downward tired transition with rain
+- Surprised: taller narrower eyes with radial burst marks
+- Sleepy: slower tired transition with floating Z marks
+- Love: heart-shaped eyes with floating hearts
+- Excited: larger happy eyes, vertical bounce and confetti
+- Dizzy: automatic shake-triggered wobble with orbiting particles
+
+Background effects fade in and out rather than appearing instantly.
+
+## Motion sensors
+
+Desk Buddy can react to the physical phone through Termux:API.
+
+It listens to:
+
+- Accelerometer
+- Gyroscope
+
+At startup it takes a short baseline calibration from the phone's current resting position.
+
+After calibration:
+
+- tilting the phone shifts and leans the eye pair with the device
+- a strong shake triggers the Dizzy reaction
+- shake detection uses both acceleration change and gyroscope angular speed so normal slow tilting should not trigger Dizzy
+
+The sensor stream uses approximately 70 ms updates.
 
 ## Requirements
 
 1. Termux
 2. Python
 3. Termux:GUI Android plugin
-4. Python binding: termuxgui
+4. Termux:API Android plugin
+5. Python binding: termuxgui
+6. Termux package: termux-api
 
-Important: Termux and Termux:GUI must come from the same installation source because Termux plugins must use matching signatures.
+Important: Termux and both plugin apps must come from the same installation source because Termux plugins need matching signatures.
 
 ## Existing clone update
 
@@ -48,36 +87,41 @@ Then launch:
 
     desk-buddy
 
-The first native run requires the Termux:GUI Android plugin to already be installed.
+Keep the phone reasonably still for roughly the first second so the tilt baseline can calibrate.
 
 ## Controls
 
 Native pixel mode:
 
-- touch and drag: the eyes follow your finger
-- quick tap: cycle happy -> curious -> annoyed -> sad
+- touch and drag: eyes follow your finger
+- quick tap: next emotion
+- tilt phone: face leans with the device
+- shake phone: Dizzy reaction
 - Android Back: close the Desk Buddy activity
 
 Terminal fallback:
 
     desk-buddy --terminal
 
-The terminal version remains only as a compatibility fallback.
+## Sensor troubleshooting
+
+Check whether Termux can see phone sensors:
+
+    termux-sensor -l
+
+Test accelerometer and gyroscope directly:
+
+    termux-sensor -s Accel,Gyro -d 200 -n 5
+
+Stop any leftover sensor listener:
+
+    termux-sensor -c
+
+If `termux-sensor` exists but returns nothing, confirm that the Termux:API Android plugin is installed from the same source as Termux and grant any permission Android asks for.
 
 ## Files
 
-    gui_buddy.py     native Termux:GUI pixel renderer
+    gui_buddy.py     native pixel renderer, effects and sensor reactions
     desk_buddy.py    old terminal fallback
     start.sh         launcher
     install.sh       installer
-
-## Next upgrades
-
-After the native renderer is stable on the phone:
-
-1. weather card animation without cluttering the face
-2. charging expression
-3. low-battery tired expression
-4. notification reactions
-5. proximity / motion reactions through Termux:API
-6. optional sounds
