@@ -19,6 +19,8 @@ from buddy_advanced import (
     discover_sensor_request,
     time_label,
 )
+from camera_vision import CameraVision
+from doodle_show import DoodleShow
 
 try:
     import termuxgui as tg
@@ -993,6 +995,12 @@ class RoboState:
     wave_started: float = 0.0
     wave_until: float = 0.0
     wave_side: int = 1
+
+    camera_present: bool = False
+    camera_x: float = 0.0
+    camera_y: float = 0.0
+    camera_last_seen: float = 0.0
+    camera_announced: bool = False
 
     touch_down_at: float = 0.0
     touch_down_x: float = 0.0
