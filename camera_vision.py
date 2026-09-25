@@ -367,8 +367,11 @@ class CameraVision:
         image = cv2.GaussianBlur(frame, (5, 5), 0)
         ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
 
-        lower = np.array([0, 128, 72], dtype=np.uint8)
-        upper = np.array([255, 184, 142], dtype=np.uint8)
+        # Keep luminance above near-black so a dark room/background does not
+        # become one giant "skin" contour. Chrominance bounds stay deliberately
+        # broad because the phone may see different skin tones and lighting.
+        lower = np.array([24, 125, 70], dtype=np.uint8)
+        upper = np.array([255, 190, 148], dtype=np.uint8)
         mask = cv2.inRange(ycrcb, lower, upper)
 
         if face_box is not None:
@@ -501,6 +504,17 @@ class CameraVision:
         # valley pattern is promoted to five rather than requiring a fragile
         # fifth contour tip.
         if valid_defects >= 4:
+            fingers = 5
+        elif (
+            valid_defects >= 3
+            and h >= w * 0.82
+            and relative_area >= 0.045
+            and solidity <= 0.88
+        ):
+            # Phone snapshots often merge two neighboring fingertips after
+            # blur/morphology, leaving only three visible valleys. In that
+            # specific open-palm geometry, treat it as five fingers, but only
+            # after the multi-frame stability gate in _analyze().
             fingers = 5
 
         return fingers, confidence
