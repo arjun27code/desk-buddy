@@ -65,16 +65,36 @@ class CameraVision:
 
         self.face_detector = None
         if cv2 is not None:
+            candidates: list[Path] = []
+
             try:
-                cascade_path = (
+                candidates.append(
                     Path(cv2.data.haarcascades)
                     / "haarcascade_frontalface_default.xml"
                 )
-                detector = cv2.CascadeClassifier(str(cascade_path))
-                if not detector.empty():
-                    self.face_detector = detector
             except Exception:
-                self.face_detector = None
+                pass
+
+            # Termux' packaged OpenCV may keep cascades under share/opencv4
+            # instead of exposing cv2.data like PyPI wheels do.
+            prefix = Path(shutil.which("python") or "/data/data/com.termux/files/usr/bin/python").parent.parent
+            candidates.extend(
+                [
+                    prefix / "share" / "opencv4" / "haarcascades" / "haarcascade_frontalface_default.xml",
+                    prefix / "share" / "opencv" / "haarcascades" / "haarcascade_frontalface_default.xml",
+                ]
+            )
+
+            for cascade_path in candidates:
+                try:
+                    if not cascade_path.exists():
+                        continue
+                    detector = cv2.CascadeClassifier(str(cascade_path))
+                    if not detector.empty():
+                        self.face_detector = detector
+                        break
+                except Exception:
+                    continue
 
     def start(self) -> None:
         if self.thread is not None and self.thread.is_alive():
