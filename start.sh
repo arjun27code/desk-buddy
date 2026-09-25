@@ -1,16 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
-set -u
+set -e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-cd "$SCRIPT_DIR" || exit 1
-
-HOST="${DESK_BUDDY_HOST:-127.0.0.1}"
-PORT="${DESK_BUDDY_PORT:-8765}"
-OPEN_BROWSER=1
-
-if [ "${1:-}" = "--no-open" ]; then
-  OPEN_BROWSER=0
-fi
+cd "$SCRIPT_DIR"
 
 if command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
@@ -21,36 +13,19 @@ else
   exit 1
 fi
 
-URL="http://${HOST}:${PORT}"
-
-"$PYTHON_BIN" server.py --host "$HOST" --port "$PORT" &
-SERVER_PID=$!
+WAKE_LOCKED=0
 
 cleanup() {
-  if kill -0 "$SERVER_PID" >/dev/null 2>&1; then
-    kill "$SERVER_PID" >/dev/null 2>&1
+  if [ "$WAKE_LOCKED" -eq 1 ] && command -v termux-wake-unlock >/dev/null 2>&1; then
+    termux-wake-unlock >/dev/null 2>&1 || true
   fi
 }
 
-trap cleanup INT TERM EXIT
+trap cleanup EXIT INT TERM
 
-sleep 1
-
-if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
-  echo "Desk Buddy failed to start. Port ${PORT} may already be in use."
-  wait "$SERVER_PID"
-  exit $?
+if command -v termux-wake-lock >/dev/null 2>&1; then
+  termux-wake-lock >/dev/null 2>&1 || true
+  WAKE_LOCKED=1
 fi
 
-if [ "$OPEN_BROWSER" -eq 1 ]; then
-  if command -v termux-open-url >/dev/null 2>&1; then
-    termux-open-url "$URL" >/dev/null 2>&1 || true
-  else
-    echo "Open this URL in your browser: $URL"
-  fi
-fi
-
-echo "Desk Buddy is running at $URL"
-echo "Press Ctrl+C in Termux to stop it."
-
-wait "$SERVER_PID"
+"$PYTHON_BIN" "$SCRIPT_DIR/desk_buddy.py" "$@"
