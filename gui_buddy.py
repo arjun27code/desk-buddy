@@ -14,45 +14,21 @@ try:
 except ModuleNotFoundError:
     print("Termux:GUI Python bindings are missing.")
     print("Run: python -m pip install termuxgui")
-    sys.exit(2)
+    raise SystemExit(2)
 
 
-FPS = 40.0
+# The face below is an independent Python/Termux:GUI adaptation of the
+# public behavior and geometry documented by FluxGarage RoboEyes.
+# Reference project: https://github.com/FluxGarage/RoboEyes
+VIRTUAL_W = 128.0
+VIRTUAL_H = 64.0
+FPS = 50.0
 FRAME_TIME = 1.0 / FPS
 EMOTION_HOLD = 2.5
 EMOTION_CYCLE = ["happy", "curious", "annoyed", "sad"]
 
 BLACK = (0, 0, 0, 255)
-CYAN = (24, 232, 238, 255)
-CYAN_GLOW = (0, 58, 64, 255)
-CYAN_GLOW_2 = (0, 25, 29, 255)
-WHITE = (240, 255, 255, 255)
-
-
-@dataclass
-class FaceState:
-    mood: str = "idle"
-    mood_until: float = 0.0
-    cycle_index: int = 0
-
-    gaze_x: float = 0.0
-    gaze_y: float = 0.0
-    target_x: float = 0.0
-    target_y: float = 0.0
-    next_gaze: float = 0.0
-    manual_gaze_until: float = 0.0
-
-    blinking: bool = False
-    blink_started: float = 0.0
-    blink_duration: float = 0.20
-    next_blink: float = 0.0
-    double_blink_pending: bool = False
-
-    touch_down_time: float = 0.0
-    touch_down_x: float = 0.0
-    touch_down_y: float = 0.0
-    touch_last_x: float = 0.0
-    touch_last_y: float = 0.0
+CYAN = (18, 238, 242, 255)
 
 
 class PixelCanvas:
@@ -101,6 +77,7 @@ class PixelCanvas:
         y1 = int(round(y))
         x2 = int(round(x + w))
         y2 = int(round(y + h))
+
         for yy in range(y1, y2):
             self.span(yy, x1, x2, color)
 
@@ -141,27 +118,6 @@ class PixelCanvas:
 
             self.span(y + row, x + inset, x + w - inset, color)
 
-    def ellipse(
-        self,
-        cx: float,
-        cy: float,
-        rx: float,
-        ry: float,
-        color: tuple[int, int, int, int],
-    ) -> None:
-        if rx <= 0 or ry <= 0:
-            return
-
-        top = int(math.floor(cy - ry))
-        bottom = int(math.ceil(cy + ry))
-
-        for yy in range(top, bottom + 1):
-            normalized = (yy + 0.5 - cy) / ry
-            if abs(normalized) > 1.0:
-                continue
-            half = rx * math.sqrt(max(0.0, 1.0 - normalized * normalized))
-            self.span(yy, int(cx - half), int(cx + half) + 1, color)
-
     def polygon(
         self,
         points: Iterable[tuple[float, float]],
@@ -178,364 +134,566 @@ class PixelCanvas:
             scan_y = yy + 0.5
             intersections: list[float] = []
 
-            for i, (x1, y1) in enumerate(pts):
-                x2, y2 = pts[(i + 1) % len(pts)]
+            for index, (x1, y1) in enumerate(pts):
+                x2, y2 = pts[(index + 1) % len(pts)]
                 if y1 == y2:
                     continue
 
-                low_y = min(y1, y2)
-                high_y = max(y1, y2)
-                if not (low_y <= scan_y < high_y):
+                low = min(y1, y2)
+                high = max(y1, y2)
+                if not (low <= scan_y < high):
                     continue
 
                 t = (scan_y - y1) / (y2 - y1)
                 intersections.append(x1 + t * (x2 - x1))
 
             intersections.sort()
-            for i in range(0, len(intersections) - 1, 2):
+            for index in range(0, len(intersections) - 1, 2):
                 self.span(
                     yy,
-                    int(math.floor(intersections[i])),
-                    int(math.ceil(intersections[i + 1])),
+                    int(math.floor(intersections[index])),
+                    int(math.ceil(intersections[index + 1])),
                     color,
                 )
 
 
-class RoboFace:
-    def __init__(self, width: int, height: int):
-        self.w = width
-        self.h = height
+class VirtualOLED:
+    """Maps an exact 128x64 RoboEyes-style coordinate system to the phone."""
 
-        now = time.monotonic()
-        self.state = FaceState(
-            next_gaze=now + random.uniform(0.8, 1.8),
-            next_blink=now + random.uniform(1.8, 4.0),
+    def __init__(self, canvas: PixelCanvas):
+        self.canvas = canvas
+
+        # Do not stretch the eyes to the whole phone. A 128x64 OLED is 2:1,
+        # so keep that visual window intact and center it on the phone.
+        target_w = canvas.width * 0.90
+        self.scale = target_w / VIRTUAL_W
+        self.ox = (canvas.width - VIRTUAL_W * self.scale) / 2.0
+        face_h = VIRTUAL_H * self.scale
+        self.oy = canvas.height * 0.47 - face_h / 2.0
+
+    def x(self, value: float) -> float:
+        return self.ox + value * self.scale
+
+    def y(self, value: float) -> float:
+        return self.oy + value * self.scale
+
+    def s(self, value: float) -> float:
+        return value * self.scale
+
+    def rounded_rect(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        radius: float,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        self.canvas.rounded_rect(
+            self.x(x),
+            self.y(y),
+            self.s(w),
+            self.s(h),
+            self.s(radius),
+            color,
         )
+
+    def polygon(
+        self,
+        points: Iterable[tuple[float, float]],
+        color: tuple[int, int, int, int],
+    ) -> None:
+        self.canvas.polygon(
+            [(self.x(x), self.y(y)) for x, y in points],
+            color,
+        )
+
+    def phone_to_virtual(self, x: float, y: float) -> tuple[float, float]:
+        return (
+            (x - self.ox) / self.scale,
+            (y - self.oy) / self.scale,
+        )
+
+
+@dataclass
+class RoboState:
+    # Default RoboEyes geometry.
+    eye_l_w_default: float = 36.0
+    eye_l_h_default: float = 36.0
+    eye_r_w_default: float = 36.0
+    eye_r_h_default: float = 36.0
+    radius_l_default: float = 8.0
+    radius_r_default: float = 8.0
+    space_default: float = 10.0
+
+    # Current and next geometry. Eyes intentionally start almost closed.
+    eye_l_w: float = 36.0
+    eye_l_h: float = 1.0
+    eye_r_w: float = 36.0
+    eye_r_h: float = 1.0
+    eye_l_w_next: float = 36.0
+    eye_l_h_next: float = 36.0
+    eye_r_w_next: float = 36.0
+    eye_r_h_next: float = 36.0
+
+    radius_l: float = 8.0
+    radius_r: float = 8.0
+    radius_l_next: float = 8.0
+    radius_r_next: float = 8.0
+
+    space: float = 10.0
+    space_next: float = 10.0
+
+    eye_l_x: float = 23.0
+    eye_l_y: float = 14.0
+    eye_r_x: float = 69.0
+    eye_r_y: float = 14.0
+    eye_l_x_next: float = 23.0
+    eye_l_y_next: float = 14.0
+    eye_r_x_next: float = 69.0
+    eye_r_y_next: float = 14.0
+
+    eye_l_h_offset: float = 0.0
+    eye_r_h_offset: float = 0.0
+
+    eyelid_tired: float = 0.0
+    eyelid_tired_next: float = 0.0
+    eyelid_angry: float = 0.0
+    eyelid_angry_next: float = 0.0
+    happy_bottom: float = 0.0
+    happy_bottom_next: float = 0.0
+
+    tired: bool = False
+    angry: bool = False
+    happy: bool = False
+    curious: bool = True
+
+    eye_l_open: bool = False
+    eye_r_open: bool = False
+
+    autoblink: bool = True
+    blink_interval: int = 3
+    blink_variation: int = 2
+    next_blink: float = 0.0
+
+    idle: bool = True
+    idle_interval: int = 2
+    idle_variation: int = 2
+    next_idle: float = 0.0
+
+    h_flicker: bool = False
+    h_flicker_amp: float = 2.0
+    h_flicker_alt: bool = False
+
+    v_flicker: bool = False
+    v_flicker_amp: float = 5.0
+    v_flicker_alt: bool = False
+
+    laugh: bool = False
+    laugh_until: float = 0.0
+
+    mood_name: str = "idle"
+    mood_until: float = 0.0
+    cycle_index: int = 0
+
+    touch_down_at: float = 0.0
+    touch_down_x: float = 0.0
+    touch_down_y: float = 0.0
+    touch_last_x: float = 0.0
+    touch_last_y: float = 0.0
+    manual_until: float = 0.0
+
+
+class RoboEyesFace:
+    def __init__(self):
+        self.state = RoboState()
         self.lock = threading.Lock()
 
-    def set_mood(self, mood: str) -> None:
         now = time.monotonic()
-        self.state.mood = mood
-        self.state.mood_until = now + EMOTION_HOLD
+        self.state.next_blink = self._next_blink(now)
+        self.state.next_idle = self._next_idle(now)
 
-        if mood == "curious":
-            self.state.target_x = 0.78
-            self.state.target_y = -0.72
-        elif mood == "sad":
-            self.state.target_x = 0.0
-            self.state.target_y = 0.72
+    @staticmethod
+    def _rand_variation(value: int) -> int:
+        if value <= 0:
+            return 0
+        return random.randrange(value)
+
+    def _next_blink(self, now: float) -> float:
+        s = self.state
+        return now + s.blink_interval + self._rand_variation(s.blink_variation)
+
+    def _next_idle(self, now: float) -> float:
+        s = self.state
+        return now + s.idle_interval + self._rand_variation(s.idle_variation)
+
+    def _constraint_x(self) -> float:
+        s = self.state
+        return max(
+            0.0,
+            VIRTUAL_W - s.eye_l_w - s.space - s.eye_r_w,
+        )
+
+    def _constraint_y(self) -> float:
+        return max(0.0, VIRTUAL_H - self.state.eye_l_h_default)
+
+    def set_position(self, name: str) -> None:
+        s = self.state
+        max_x = self._constraint_x()
+        max_y = self._constraint_y()
+
+        positions = {
+            "N": (max_x / 2.0, 0.0),
+            "NE": (max_x, 0.0),
+            "E": (max_x, max_y / 2.0),
+            "SE": (max_x, max_y),
+            "S": (max_x / 2.0, max_y),
+            "SW": (0.0, max_y),
+            "W": (0.0, max_y / 2.0),
+            "NW": (0.0, 0.0),
+            "DEFAULT": (max_x / 2.0, max_y / 2.0),
+        }
+
+        s.eye_l_x_next, s.eye_l_y_next = positions.get(
+            name,
+            positions["DEFAULT"],
+        )
+
+    def set_mood(self, mood: str) -> None:
+        s = self.state
+        s.tired = mood == "tired"
+        s.angry = mood == "angry"
+        s.happy = mood == "happy"
+
+    def close(self) -> None:
+        s = self.state
+        s.eye_l_h_next = 1.0
+        s.eye_r_h_next = 1.0
+        s.eye_l_open = False
+        s.eye_r_open = False
+
+    def open(self) -> None:
+        s = self.state
+        s.eye_l_open = True
+        s.eye_r_open = True
+
+    def blink(self) -> None:
+        self.close()
+        self.open()
+
+    def set_emotion(self, mood: str) -> None:
+        s = self.state
+        now = time.monotonic()
+
+        # Clear behavior left by previous emotion.
+        s.h_flicker = False
+        s.v_flicker = False
+        s.laugh = False
+
+        s.mood_name = mood
+        if mood == "idle":
+            s.mood_until = 0.0
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = True
+            s.curious = True
+            return
+
+        s.mood_until = now + EMOTION_HOLD
+
+        if mood == "happy":
+            self.set_mood("happy")
+            s.idle = False
+            s.curious = True
+            s.laugh = True
+            s.laugh_until = now + 0.5
+
+        elif mood == "curious":
+            self.set_mood("default")
+            s.curious = True
+            self.set_position("NE")
+            s.idle = False
+
         elif mood == "annoyed":
-            self.state.target_x = -0.15
-            self.state.target_y = 0.0
-        elif mood == "happy":
-            self.state.target_x = 0.0
-            self.state.target_y = -0.08
+            self.set_mood("angry")
+            s.idle = False
+            s.curious = True
+            s.h_flicker = True
+            s.h_flicker_amp = 2.0
+
+        elif mood == "sad":
+            self.set_mood("tired")
+            self.set_position("S")
+            s.idle = False
+            s.curious = True
 
     def cycle_emotion(self) -> None:
-        mood = EMOTION_CYCLE[self.state.cycle_index]
-        self.state.cycle_index = (self.state.cycle_index + 1) % len(EMOTION_CYCLE)
-        self.set_mood(mood)
-
-    def _start_blink(self, now: float) -> None:
-        self.state.blinking = True
-        self.state.blink_started = now
-        self.state.blink_duration = random.uniform(0.16, 0.22)
-        self.state.double_blink_pending = random.random() < 0.10
-        self.state.next_blink = now + random.uniform(2.0, 5.0)
-
-    def _blink_open(self, now: float) -> float:
         s = self.state
-        if not s.blinking:
-            return 1.0
-
-        p = (now - s.blink_started) / max(0.05, s.blink_duration)
-        if p >= 1.0:
-            s.blinking = False
-            if s.double_blink_pending:
-                s.double_blink_pending = False
-                s.next_blink = now + 0.13
-            return 1.0
-
-        if p < 0.5:
-            eased = 1.0 - (p / 0.5)
-        else:
-            eased = (p - 0.5) / 0.5
-
-        return max(0.04, eased * eased * (3.0 - 2.0 * eased))
-
-    def update(self, now: float) -> None:
-        s = self.state
-
-        if s.mood != "idle" and now >= s.mood_until:
-            s.mood = "idle"
-            s.next_gaze = now + random.uniform(0.4, 1.2)
-
-        if not s.blinking and now >= s.next_blink:
-            self._start_blink(now)
-
-        if now >= s.manual_gaze_until:
-            if s.mood == "curious":
-                s.target_x = 0.78
-                s.target_y = -0.72
-            elif s.mood == "sad":
-                s.target_x = 0.0
-                s.target_y = 0.72
-            elif s.mood == "annoyed":
-                s.target_x = -0.10
-                s.target_y = 0.0
-            elif s.mood == "happy":
-                s.target_x = 0.0
-                s.target_y = -0.10
-            elif now >= s.next_gaze and not s.blinking:
-                s.target_x, s.target_y = random.choice(
-                    [
-                        (0.0, 0.0),
-                        (0.0, 0.0),
-                        (0.0, 0.0),
-                        (-0.75, 0.0),
-                        (0.75, 0.0),
-                        (-0.58, -0.50),
-                        (0.58, -0.50),
-                        (-0.45, 0.48),
-                        (0.45, 0.48),
-                    ]
-                )
-                s.next_gaze = now + random.uniform(0.5, 3.0)
-
-        ease = 0.16 if s.mood == "idle" else 0.25
-        s.gaze_x += (s.target_x - s.gaze_x) * ease
-        s.gaze_y += (s.target_y - s.gaze_y) * ease
+        mood = EMOTION_CYCLE[s.cycle_index]
+        s.cycle_index = (s.cycle_index + 1) % len(EMOTION_CYCLE)
+        self.set_emotion(mood)
 
     def on_touch(
         self,
         action: str,
         x: float,
         y: float,
+        oled: VirtualOLED,
     ) -> None:
-        now = time.monotonic()
         s = self.state
+        now = time.monotonic()
+        vx, vy = oled.phone_to_virtual(x, y)
 
         if action == "down":
-            s.touch_down_time = now
+            s.touch_down_at = now
             s.touch_down_x = x
             s.touch_down_y = y
             s.touch_last_x = x
             s.touch_last_y = y
 
         if action in {"down", "move"}:
-            nx = (x / max(1, self.w) - 0.5) * 2.0
-            ny = (y / max(1, self.h) - 0.5) * 2.0
-            s.target_x = max(-1.0, min(1.0, nx))
-            s.target_y = max(-1.0, min(1.0, ny))
-            s.manual_gaze_until = now + 0.85
+            max_x = self._constraint_x()
+            max_y = self._constraint_y()
+
+            # The finger controls the complete pair, just like setPosition().
+            normalized_x = max(0.0, min(1.0, vx / VIRTUAL_W))
+            normalized_y = max(0.0, min(1.0, vy / VIRTUAL_H))
+
+            s.eye_l_x_next = normalized_x * max_x
+            s.eye_l_y_next = normalized_y * max_y
+            s.manual_until = now + 0.8
+            s.idle = False
+
             s.touch_last_x = x
             s.touch_last_y = y
 
         if action == "up":
-            duration = now - s.touch_down_time
-            travel = math.hypot(
+            duration = now - s.touch_down_at
+            distance = math.hypot(
                 s.touch_last_x - s.touch_down_x,
                 s.touch_last_y - s.touch_down_y,
             )
-            if duration <= 0.35 and travel <= max(25.0, self.w * 0.06):
+
+            if duration <= 0.35 and distance <= 28.0:
                 self.cycle_emotion()
+            elif s.mood_name == "idle":
+                s.idle = True
+                s.next_idle = self._next_idle(now)
 
-    def _face_geometry(self, now: float):
+    def _update_curiosity(self) -> None:
         s = self.state
-
-        face_w = self.w * 0.86
-        scale = face_w / 128.0
-        face_h = 64.0 * scale
-
-        center_x = self.w / 2.0
-        center_y = self.h * 0.48
-
-        eye_w = 36.0 * scale
-        eye_h = 34.0 * scale
-        radius = 8.0 * scale
-        space = 12.0 * scale
-
-        if s.mood == "happy":
-            eye_h *= 0.88
-        elif s.mood == "sad":
-            eye_h *= 0.82
-        elif s.mood == "annoyed":
-            eye_h *= 0.86
-
-        shift_x = s.gaze_x * 9.0 * scale
-        shift_y = s.gaze_y * 6.5 * scale
-
-        if s.mood == "happy":
-            shift_y += math.sin(now * 16.0) * 2.1 * scale
-        elif s.mood == "annoyed":
-            shift_x += math.sin(now * 30.0) * 1.8 * scale
-
-        blink = self._blink_open(now)
-        eye_h *= blink
-
-        left_x = center_x - space / 2.0 - eye_w + shift_x
-        right_x = center_x + space / 2.0 + shift_x
-        base_y = center_y - eye_h / 2.0 + shift_y
-
-        left_h = eye_h
-        right_h = eye_h
-        left_y = base_y
-        right_y = base_y
-
-        if s.mood == "curious":
-            extra = 7.0 * scale
-            if s.gaze_x >= 0:
-                right_h += extra
-                right_y -= extra / 2.0
-            else:
-                left_h += extra
-                left_y -= extra / 2.0
-
-        return (
-            left_x,
-            left_y,
-            eye_w,
-            left_h,
-            right_x,
-            right_y,
-            eye_w,
-            right_h,
-            radius,
-            scale,
-        )
-
-    def _draw_eye(
-        self,
-        canvas: PixelCanvas,
-        x: float,
-        y: float,
-        w: float,
-        h: float,
-        radius: float,
-        side: str,
-        mood: str,
-        scale: float,
-    ) -> None:
-        if h <= 2.0:
-            canvas.rounded_rect(
-                x,
-                y + h / 2.0,
-                w,
-                max(2.0, 1.8 * scale),
-                1.0 * scale,
-                CYAN,
-            )
+        if not s.curious:
+            s.eye_l_h_offset = 0.0
+            s.eye_r_h_offset = 0.0
             return
 
-        glow_pad = 4.5 * scale
-        canvas.rounded_rect(
-            x - glow_pad * 2,
-            y - glow_pad * 2,
-            w + glow_pad * 4,
-            h + glow_pad * 4,
-            radius + glow_pad * 2,
-            CYAN_GLOW_2,
-        )
-        canvas.rounded_rect(
-            x - glow_pad,
-            y - glow_pad,
-            w + glow_pad * 2,
-            h + glow_pad * 2,
-            radius + glow_pad,
-            CYAN_GLOW,
-        )
-        canvas.rounded_rect(x, y, w, h, radius, CYAN)
+        max_x = self._constraint_x()
 
-        if mood == "happy":
-            canvas.ellipse(
-                x + w / 2.0,
-                y + h * 1.03,
-                w * 0.60,
-                h * 0.62,
-                BLACK,
-            )
+        s.eye_l_h_offset = 8.0 if s.eye_l_x_next <= 10.0 else 0.0
 
-        elif mood == "annoyed":
-            cut = h * 0.42
-            if side == "left":
-                canvas.polygon(
-                    [
-                        (x - 1, y - 1),
-                        (x + w + 1, y - 1),
-                        (x + w + 1, y + cut),
-                        (x - 1, y + cut * 0.08),
-                    ],
-                    BLACK,
-                )
+        right_next = s.eye_l_x_next + s.eye_l_w + s.space
+        right_edge_threshold = VIRTUAL_W - s.eye_r_w - 10.0
+        s.eye_r_h_offset = 8.0 if right_next >= right_edge_threshold else 0.0
+
+        # max_x is intentionally read above because the original curiosity
+        # behavior is tied to the same screen constraints used by positions.
+        _ = max_x
+
+    def update(self, now: float) -> None:
+        s = self.state
+
+        if s.mood_name != "idle" and now >= s.mood_until:
+            self.set_emotion("idle")
+
+        if s.manual_until and now >= s.manual_until:
+            s.manual_until = 0.0
+            if s.mood_name == "idle":
+                s.idle = True
+                s.next_idle = self._next_idle(now)
+
+        if s.autoblink and now >= s.next_blink:
+            self.blink()
+            s.next_blink = self._next_blink(now)
+
+        if s.idle and s.manual_until == 0.0 and now >= s.next_idle:
+            max_x = max(1, int(self._constraint_x()))
+            max_y = max(1, int(self._constraint_y()))
+            s.eye_l_x_next = float(random.randrange(max_x))
+            s.eye_l_y_next = float(random.randrange(max_y))
+            s.next_idle = self._next_idle(now)
+
+        if s.laugh:
+            if now < s.laugh_until:
+                s.v_flicker = True
+                s.v_flicker_amp = 5.0
             else:
-                canvas.polygon(
-                    [
-                        (x - 1, y - 1),
-                        (x + w + 1, y - 1),
-                        (x + w + 1, y + cut * 0.08),
-                        (x - 1, y + cut),
-                    ],
-                    BLACK,
-                )
+                s.v_flicker = False
+                s.laugh = False
 
-        elif mood == "sad":
-            cut = h * 0.34
-            if side == "left":
-                canvas.polygon(
-                    [
-                        (x - 1, y - 1),
-                        (x + w + 1, y - 1),
-                        (x + w + 1, y + cut * 0.06),
-                        (x - 1, y + cut),
-                    ],
-                    BLACK,
-                )
-            else:
-                canvas.polygon(
-                    [
-                        (x - 1, y - 1),
-                        (x + w + 1, y - 1),
-                        (x + w + 1, y + cut),
-                        (x - 1, y + cut * 0.06),
-                    ],
-                    BLACK,
-                )
+        self._update_curiosity()
 
-    def draw(self, canvas: PixelCanvas, now: float) -> None:
+        # Smooth transitions copied conceptually from RoboEyes:
+        # current = (current + next) / 2.
+        s.eye_l_h = (s.eye_l_h + s.eye_l_h_next + s.eye_l_h_offset) / 2.0
+        s.eye_l_y += (s.eye_l_h_default - s.eye_l_h) / 2.0
+        s.eye_l_y -= s.eye_l_h_offset / 2.0
+
+        s.eye_r_h = (s.eye_r_h + s.eye_r_h_next + s.eye_r_h_offset) / 2.0
+        s.eye_r_y += (s.eye_r_h_default - s.eye_r_h) / 2.0
+        s.eye_r_y -= s.eye_r_h_offset / 2.0
+
+        if s.eye_l_open and s.eye_l_h <= 1.0 + s.eye_l_h_offset:
+            s.eye_l_h_next = s.eye_l_h_default
+
+        if s.eye_r_open and s.eye_r_h <= 1.0 + s.eye_r_h_offset:
+            s.eye_r_h_next = s.eye_r_h_default
+
+        s.eye_l_w = (s.eye_l_w + s.eye_l_w_next) / 2.0
+        s.eye_r_w = (s.eye_r_w + s.eye_r_w_next) / 2.0
+        s.space = (s.space + s.space_next) / 2.0
+
+        s.eye_l_x = (s.eye_l_x + s.eye_l_x_next) / 2.0
+        s.eye_l_y = (s.eye_l_y + s.eye_l_y_next) / 2.0
+
+        s.eye_r_x_next = s.eye_l_x_next + s.eye_l_w + s.space
+        s.eye_r_y_next = s.eye_l_y_next
+        s.eye_r_x = (s.eye_r_x + s.eye_r_x_next) / 2.0
+        s.eye_r_y = (s.eye_r_y + s.eye_r_y_next) / 2.0
+
+        s.radius_l = (s.radius_l + s.radius_l_next) / 2.0
+        s.radius_r = (s.radius_r + s.radius_r_next) / 2.0
+
+        if s.tired:
+            s.eyelid_tired_next = s.eye_l_h / 2.0
+            s.eyelid_angry_next = 0.0
+        else:
+            s.eyelid_tired_next = 0.0
+
+        if s.angry:
+            s.eyelid_angry_next = s.eye_l_h / 2.0
+            s.eyelid_tired_next = 0.0
+        else:
+            s.eyelid_angry_next = 0.0
+
+        s.happy_bottom_next = s.eye_l_h / 2.0 if s.happy else 0.0
+
+        s.eyelid_tired = (s.eyelid_tired + s.eyelid_tired_next) / 2.0
+        s.eyelid_angry = (s.eyelid_angry + s.eyelid_angry_next) / 2.0
+        s.happy_bottom = (s.happy_bottom + s.happy_bottom_next) / 2.0
+
+    def draw(self, canvas: PixelCanvas, oled: VirtualOLED, now: float) -> None:
+        s = self.state
         self.update(now)
         canvas.clear()
 
-        (
+        lx = s.eye_l_x
+        ly = s.eye_l_y
+        rx = s.eye_r_x
+        ry = s.eye_r_y
+
+        if s.h_flicker:
+            dx = s.h_flicker_amp if s.h_flicker_alt else -s.h_flicker_amp
+            s.h_flicker_alt = not s.h_flicker_alt
+            lx += dx
+            rx += dx
+
+        if s.v_flicker:
+            dy = s.v_flicker_amp if s.v_flicker_alt else -s.v_flicker_amp
+            s.v_flicker_alt = not s.v_flicker_alt
+            ly += dy
+            ry += dy
+
+        # Base eyes. No pupils, no highlights, no glow.
+        oled.rounded_rect(
             lx,
             ly,
-            lw,
-            lh,
+            s.eye_l_w,
+            s.eye_l_h,
+            s.radius_l,
+            CYAN,
+        )
+        oled.rounded_rect(
             rx,
             ry,
-            rw,
-            rh,
-            radius,
-            scale,
-        ) = self._face_geometry(now)
+            s.eye_r_w,
+            s.eye_r_h,
+            s.radius_r,
+            CYAN,
+        )
 
-        mood = self.state.mood
-        self._draw_eye(canvas, lx, ly, lw, lh, radius, "left", mood, scale)
-        self._draw_eye(canvas, rx, ry, rw, rh, radius, "right", mood, scale)
+        # TIRED top eyelids.
+        if s.eyelid_tired > 0.05:
+            oled.polygon(
+                [
+                    (lx, ly - 1),
+                    (lx + s.eye_l_w, ly - 1),
+                    (lx, ly + s.eyelid_tired - 1),
+                ],
+                BLACK,
+            )
+            oled.polygon(
+                [
+                    (rx, ry - 1),
+                    (rx + s.eye_r_w, ry - 1),
+                    (rx + s.eye_r_w, ry + s.eyelid_tired - 1),
+                ],
+                BLACK,
+            )
+
+        # ANGRY top eyelids.
+        if s.eyelid_angry > 0.05:
+            oled.polygon(
+                [
+                    (lx, ly - 1),
+                    (lx + s.eye_l_w, ly - 1),
+                    (lx + s.eye_l_w, ly + s.eyelid_angry - 1),
+                ],
+                BLACK,
+            )
+            oled.polygon(
+                [
+                    (rx, ry - 1),
+                    (rx + s.eye_r_w, ry - 1),
+                    (rx, ry + s.eyelid_angry - 1),
+                ],
+                BLACK,
+            )
+
+        # HAPPY bottom eyelids. This is intentionally a black rounded rectangle
+        # overlay, matching the RoboEyes drawing method instead of inventing
+        # curved pupils or a separate smile.
+        if s.happy_bottom > 0.05:
+            oled.rounded_rect(
+                lx - 1,
+                (ly + s.eye_l_h) - s.happy_bottom + 1,
+                s.eye_l_w + 2,
+                s.eye_l_h_default,
+                s.radius_l,
+                BLACK,
+            )
+            oled.rounded_rect(
+                rx - 1,
+                (ry + s.eye_r_h) - s.happy_bottom + 1,
+                s.eye_r_w + 2,
+                s.eye_r_h_default,
+                s.radius_r,
+                BLACK,
+            )
 
 
 def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
     if screen_w_px <= 0 or screen_h_px <= 0:
-        return 432, 960
+        return 400, 900
 
-    max_w = 432
+    max_w = 400
     scale = min(1.0, max_w / float(screen_w_px))
     width = max(320, int(round(screen_w_px * scale)))
-    height = max(560, int(round(screen_h_px * scale)))
+    height = max(620, int(round(screen_h_px * scale)))
 
-    if height > 980:
-        factor = 980.0 / height
+    if height > 920:
+        factor = 920.0 / height
         width = max(300, int(round(width * factor)))
-        height = 980
+        height = 920
 
     return width, height
 
@@ -543,7 +701,8 @@ def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
 def event_worker(
     connection,
     image_view,
-    face: RoboFace,
+    face: RoboEyesFace,
+    oled: VirtualOLED,
     stop: threading.Event,
 ) -> None:
     try:
@@ -551,10 +710,9 @@ def event_worker(
             if stop.is_set():
                 return
 
-            if event.type == tg.Event.destroy:
-                if event.value.get("finishing", False):
-                    stop.set()
-                    return
+            if event.type == tg.Event.destroy and event.value.get("finishing", False):
+                stop.set()
+                return
 
             if event.type != tg.Event.touch:
                 continue
@@ -563,11 +721,11 @@ def event_worker(
                 continue
 
             action = event.value.get("action", "")
-            groups = event.value.get("pointers") or []
-            if not groups:
+            pointer_groups = event.value.get("pointers") or []
+            if not pointer_groups:
                 continue
 
-            latest = groups[-1]
+            latest = pointer_groups[-1]
             if not latest:
                 continue
 
@@ -579,7 +737,7 @@ def event_worker(
                 continue
 
             with face.lock:
-                face.on_touch(action, x, y)
+                face.on_touch(action, x, y, oled)
 
     except Exception:
         stop.set()
@@ -596,7 +754,7 @@ def main() -> int:
                 0xFF000000,
                 0xFF000000,
                 0xFFFFFFFF,
-                0xFFFFFF00,
+                0xFF00FFFF,
             )
 
             image = tg.ImageView(activity)
@@ -604,37 +762,41 @@ def main() -> int:
             image.setbackgroundcolor(0xFF000000)
             image.sendtouchevent(True)
 
+            dims = [0, 0]
             for _ in range(200):
                 dims = image.getdimensions()
                 if dims and dims[0] > 0 and dims[1] > 0:
                     break
                 time.sleep(0.01)
-            else:
+
+            if not dims or dims[0] <= 0 or dims[1] <= 0:
                 dims = [1080, 2400]
 
             buffer_w, buffer_h = choose_buffer_size(int(dims[0]), int(dims[1]))
             buffer = tg.Buffer(connection, buffer_w, buffer_h)
             image.setbuffer(buffer)
 
-            face = RoboFace(buffer_w, buffer_h)
+            face = RoboEyesFace()
             stop = threading.Event()
-
-            watcher = threading.Thread(
-                target=event_worker,
-                args=(connection, image, face, stop),
-                daemon=True,
-            )
-            watcher.start()
 
             with buffer as mem:
                 canvas = PixelCanvas(mem, buffer_w, buffer_h)
+                oled = VirtualOLED(canvas)
+
+                watcher = threading.Thread(
+                    target=event_worker,
+                    args=(connection, image, face, oled, stop),
+                    daemon=True,
+                )
+                watcher.start()
+
                 next_frame = time.monotonic()
 
                 while not stop.is_set():
                     now = time.monotonic()
 
                     with face.lock:
-                        face.draw(canvas, now)
+                        face.draw(canvas, oled, now)
 
                     buffer.blit()
                     image.refresh()
@@ -651,10 +813,8 @@ def main() -> int:
 
     except RuntimeError as exc:
         print()
-        print("Desk Buddy native renderer could not connect to Termux:GUI.")
-        print("Install the Termux:GUI Android plugin from the SAME source as Termux.")
-        print("Then run: python -m pip install termuxgui")
-        print()
+        print("Desk Buddy could not connect to Termux:GUI.")
+        print("Make sure Termux and Termux:GUI are installed from the same source.")
         print(f"Details: {exc}")
         return 3
 
