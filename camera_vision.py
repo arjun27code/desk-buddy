@@ -274,8 +274,8 @@ class CameraVision:
         # Small mirrored front-camera preview. Store RGBA bytes in the shared
         # state so the native pixel canvas can alpha-blend it directly without
         # depending on unsupported Termux:GUI absolute-position APIs.
-        preview_max_w = 112
-        preview_max_h = 150
+        preview_max_w = 96
+        preview_max_h = 128
         preview_scale = min(
             preview_max_w / float(width),
             preview_max_h / float(height),
