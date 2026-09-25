@@ -1,127 +1,83 @@
 # Desk Buddy
 
-A phone-first Desk Buddy that runs directly inside Termux.
+Phone-first Desk Buddy powered by Termux.
 
-The phone screen itself becomes the Desk Buddy display. There is no website, browser UI or localhost server.
+The default version now uses a native Android pixel surface through Termux:GUI. It is not a website and does not use localhost or a browser.
 
-## Visual system
+## Why the renderer changed
 
-The current face is inspired by the visual behavior of small OLED DeskBuddy-style robots:
+A terminal is built from character cells. That is fine for proving the behavior loop, but it cannot produce genuinely smooth RoboEyes-style curves.
 
-- Large filled rounded eyes instead of outline boxes
-- Dark pupils inside bright eyes
-- White reflection highlights
-- Smooth gaze interpolation
-- Random eye saccades
-- Fast natural blinks
-- Occasional double blinks
-- Subtle eye breathing
-- Mood-specific eye shapes
-- Clean face-first layout with controls hidden after startup
+The default renderer now uses a shared pixel buffer through Termux:GUI so the face can be drawn like an OLED robot display.
 
-Moods currently include:
+## Native face behavior
 
-- Normal
-- Happy
-- Love / heart eyes
-- Excited
-- Surprised
-- Sleepy
-- Focused
-- Sad
-- Suspicious
+- bright rounded cyan RoboEyes-style eyes
+- no giant rectangular pupils
+- soft cyan glow
+- smooth whole-eye idle movement
+- touch-follow gaze
+- natural auto blinking
+- occasional double blink
+- happy laugh/bounce
+- curious upper-corner gaze
+- annoyed angular eyelids plus horizontal flicker
+- sad/tired downward gaze
+- emotions auto-return to idle after 2.5 seconds
+- tap the face to cycle:
+  happy -> curious -> annoyed -> sad
+
+The behavior is based on the same ideas used by FluxGarage RoboEyes: configurable rounded eye geometry, auto-blinking, idle repositioning, curiosity, moods and one-shot expression animation.
+
+## Requirements
+
+1. Termux
+2. Python
+3. Termux:GUI Android plugin
+4. Python binding: termuxgui
+
+Important: Termux and Termux:GUI must come from the same installation source because Termux plugins must use matching signatures.
+
+## Existing clone update
+
+    cd ~/desk-buddy
+    git pull origin main
+    bash install.sh
+
+Then launch:
+
+    desk-buddy
+
+The first native run requires the Termux:GUI Android plugin to already be installed.
 
 ## Controls
 
-While Desk Buddy is running:
+Native pixel mode:
 
-- `B` = boop
-- `SPACE` = random mood
-- `S` = sleepy mode
-- `W` = refresh weather
-- `C` = cycle eye colour
-- `H` = show controls again
-- `Q` = quit
+- touch and drag: the eyes follow your finger
+- quick tap: cycle happy -> curious -> annoyed -> sad
+- Android Back: close the Desk Buddy activity
 
-Eye colours currently include cyan, magenta, yellow, green, blue and white.
+Terminal fallback:
 
-## Install
+    desk-buddy --terminal
 
-    pkg update
-    pkg install git python gh
+The terminal version remains only as a compatibility fallback.
 
-Clone the private repository using GitHub CLI:
+## Files
 
-    gh repo clone arjun27code/desk-buddy
-    cd desk-buddy
+    gui_buddy.py     native Termux:GUI pixel renderer
+    desk_buddy.py    old terminal fallback
+    start.sh         launcher
+    install.sh       installer
 
-Install the launcher:
+## Next upgrades
 
-    bash install.sh
+After the native renderer is stable on the phone:
 
-Then run it from anywhere:
-
-    desk-buddy
-
-## Updating an existing clone
-
-    cd ~/desk-buddy
-    git restore start.sh
-    git pull origin main
-    bash install.sh
-    desk-buddy
-
-The installer no longer changes the tracked `start.sh` file mode, so normal future pulls should stay clean.
-
-## Weather
-
-For automatic phone location, install the Termux:API Android companion app and then:
-
-    pkg install termux-api
-
-Desk Buddy will use `termux-location`.
-
-If automatic location is unavailable, save a city manually:
-
-    desk-buddy --set-city "Your City"
-
-Then launch normally:
-
-    desk-buddy
-
-Weather data comes from Open-Meteo.
-
-## Battery
-
-Battery reactions use:
-
-    termux-battery-status
-
-This requires the Termux:API companion app plus:
-
-    pkg install termux-api
-
-Desk Buddy still runs without Termux:API. Battery and automatic location simply remain unavailable.
-
-## Architecture
-
-    Android phone
-        |
-        |-- Termux
-             |
-             |-- desk_buddy.py
-             |     |-- OLED-style face renderer
-             |     |-- animation physics
-             |     |-- moods
-             |     |-- time
-             |     |-- weather
-             |     |-- battery reactions
-             |
-             |-- start.sh
-             |-- install.sh
-
-## Current limitation
-
-This version deliberately stays inside the terminal for maximum compatibility. Termux character cells cannot match a true pixel OLED or native Android canvas exactly.
-
-If we want genuinely smooth graphical curves, touch interaction anywhere on the face, higher frame rates and hardware-like animations, the next rendering layer should use Termux:GUI or a small native Android surface while keeping Termux as the engine.
+1. weather card animation without cluttering the face
+2. charging expression
+3. low-battery tired expression
+4. notification reactions
+5. proximity / motion reactions through Termux:API
+6. optional sounds
