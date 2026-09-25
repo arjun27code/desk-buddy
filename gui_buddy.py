@@ -42,6 +42,29 @@ EMOTION_CYCLE = [
     "sleepy",
     "love",
     "excited",
+    "shy",
+    "confused",
+    "scared",
+    "proud",
+    "bored",
+]
+
+AUTO_EMOTION_POOL = [
+    "happy",
+    "happy",
+    "curious",
+    "curious",
+    "sleepy",
+    "love",
+    "excited",
+    "shy",
+    "confused",
+    "proud",
+    "bored",
+    "surprised",
+    "sad",
+    "annoyed",
+    "scared",
 ]
 
 BLACK = (0, 0, 0, 255)
@@ -378,6 +401,7 @@ class Particle:
 
 class EmotionEffects:
     def __init__(self):
+        self.rockets: list[Particle] = []
         self.fireworks: list[Particle] = []
         self.confetti: list[Particle] = []
         self.rain: list[Particle] = []
@@ -386,6 +410,9 @@ class EmotionEffects:
 
         self.last_firework = 0.0
         self.last_confetti = 0.0
+        self.last_mood = "idle"
+        self.rain_mode = "medium"
+        self.next_rain_change = 0.0
         self.last_heart = 0.0
         self.last_sleepy = 0.0
 
@@ -401,6 +428,11 @@ class EmotionEffects:
                 "love",
                 "excited",
                 "dizzy",
+                "shy",
+                "confused",
+                "scared",
+                "proud",
+                "bored",
             ]
         }
 
@@ -425,25 +457,60 @@ class EmotionEffects:
                 self.intensity[name] = max(target, self.intensity[name] - delta)
 
     def _spawn_firework(self) -> None:
-        origin_x = random.uniform(18, 110)
-        origin_y = random.uniform(7, 30)
-        color = random.choice([CYAN, WHITE, YELLOW, MAGENTA])
+        # Proper sky-rocket: launch from below, travel upward, then burst.
+        self.rockets.append(
+            Particle(
+                x=random.uniform(14, 114),
+                y=random.uniform(66, 74),
+                vx=random.uniform(-2.4, 2.4),
+                vy=random.uniform(-48.0, -36.0),
+                life=0.0,
+                ttl=random.uniform(0.72, 1.05),
+                size=random.uniform(0.8, 1.25),
+                color=random.choice(
+                    [CYAN, WHITE, YELLOW, MAGENTA, BLUE, RED]
+                ),
+            )
+        )
 
-        for index in range(18):
-            angle = math.tau * index / 18.0 + random.uniform(-0.12, 0.12)
-            speed = random.uniform(15.0, 27.0)
+    def _explode_firework(self, rocket: Particle) -> None:
+        spokes = random.choice([16, 18, 22, 26])
+        phase = random.uniform(0.0, math.tau)
+
+        for index in range(spokes):
+            angle = phase + math.tau * index / spokes + random.uniform(-0.08, 0.08)
+            speed = random.uniform(13.0, 29.0)
+            color = random.choice(
+                [rocket.color, CYAN, WHITE, YELLOW, MAGENTA, BLUE, RED]
+            )
             self.fireworks.append(
                 Particle(
-                    x=origin_x,
-                    y=origin_y,
+                    x=rocket.x,
+                    y=rocket.y,
                     vx=math.cos(angle) * speed,
                     vy=math.sin(angle) * speed,
                     life=0.0,
-                    ttl=random.uniform(0.75, 1.2),
-                    size=random.uniform(0.5, 1.2),
+                    ttl=random.uniform(0.75, 1.35),
+                    size=random.uniform(0.45, 1.15),
                     color=color,
                 )
             )
+
+    def _update_rockets(self, dt: float) -> None:
+        active: list[Particle] = []
+
+        for rocket in self.rockets:
+            rocket.life += dt
+            rocket.x += rocket.vx * dt
+            rocket.y += rocket.vy * dt
+            rocket.vy += 5.5 * dt
+
+            if rocket.life >= rocket.ttl:
+                self._explode_firework(rocket)
+            else:
+                active.append(rocket)
+
+        self.rockets[:] = active
 
     def _spawn_confetti(self) -> None:
         for _ in range(9):
@@ -488,20 +555,35 @@ class EmotionEffects:
             )
         )
 
-    def _ensure_rain(self) -> None:
-        while len(self.rain) < 30:
+    def _ensure_rain(
+        self,
+        eye_color: tuple[int, int, int, int],
+    ) -> None:
+        profiles = {
+            "slow": (16, (13.0, 22.0), 0.46, (3.0, 5.0)),
+            "medium": (28, (23.0, 38.0), 0.40, (4.0, 7.0)),
+            "fast": (44, (38.0, 61.0), 0.34, (6.0, 10.0)),
+        }
+        target_count, speed_range, darkness, length_range = profiles[self.rain_mode]
+        rain_color = dim_color(eye_color, darkness)
+
+        while len(self.rain) < target_count:
+            length = random.uniform(*length_range)
             self.rain.append(
                 Particle(
                     x=random.uniform(0, 128),
-                    y=random.uniform(-20, 64),
-                    vx=random.uniform(-2.0, -0.5),
-                    vy=random.uniform(24, 42),
-                    life=0.0,
+                    y=random.uniform(-25, 64),
+                    vx=random.uniform(-4.2, -1.0),
+                    vy=random.uniform(*speed_range),
+                    life=length,
                     ttl=9999,
-                    size=random.uniform(0.5, 1.2),
-                    color=BLUE,
+                    size=random.uniform(0.45, 1.05),
+                    color=rain_color,
                 )
             )
+
+        if len(self.rain) > target_count:
+            del self.rain[target_count:]
 
     def _draw_heart(
         self,
@@ -561,7 +643,20 @@ class EmotionEffects:
         mood: str,
         now: float,
         dt: float,
+        eye_color: tuple[int, int, int, int] = CYAN,
     ) -> None:
+        if mood != self.last_mood:
+            if mood == "sad":
+                self.rain_mode = random.choice(["slow", "medium", "fast"])
+                self.next_rain_change = now + random.uniform(1.5, 2.8)
+                self.rain.clear()
+            self.last_mood = mood
+
+        if mood == "sad" and now >= self.next_rain_change:
+            self.rain_mode = random.choice(["slow", "medium", "fast"])
+            self.next_rain_change = now + random.uniform(1.4, 2.6)
+            self.rain.clear()
+
         self._approach_intensity(mood, dt)
 
         happy_i = self.intensity["happy"]
@@ -573,8 +668,13 @@ class EmotionEffects:
         love_i = self.intensity["love"]
         excited_i = self.intensity["excited"]
         dizzy_i = self.intensity["dizzy"]
+        shy_i = self.intensity["shy"]
+        confused_i = self.intensity["confused"]
+        scared_i = self.intensity["scared"]
+        proud_i = self.intensity["proud"]
+        bored_i = self.intensity["bored"]
 
-        if happy_i > 0.05 and now - self.last_firework >= 0.75:
+        if happy_i > 0.05 and now - self.last_firework >= 0.62:
             self._spawn_firework()
             self.last_firework = now
 
@@ -591,12 +691,31 @@ class EmotionEffects:
             self.last_sleepy = now
 
         if sad_i > 0.05:
-            self._ensure_rain()
+            self._ensure_rain(eye_color)
 
+        self._update_rockets(dt)
         self._update_particles(self.fireworks, dt, gravity=12.0)
         self._update_particles(self.confetti, dt, gravity=8.0)
         self._update_particles(self.hearts, dt, gravity=-0.4)
         self._update_particles(self.sleepy_marks, dt, gravity=-0.2)
+
+        for rocket in self.rockets:
+            fade = max(happy_i, 0.22)
+            trail_color = dim_color(rocket.color, fade * 0.65)
+            oled.line(
+                rocket.x,
+                rocket.y + 1.5,
+                rocket.x - rocket.vx * 0.05,
+                rocket.y + 8.0,
+                trail_color,
+                max(0.65, rocket.size * 0.75),
+            )
+            oled.circle(
+                rocket.x,
+                rocket.y,
+                max(0.65, rocket.size),
+                dim_color(rocket.color, fade),
+            )
 
         for p in self.fireworks:
             fade = (1.0 - p.life / p.ttl) * max(happy_i, 0.25)
@@ -621,12 +740,13 @@ class EmotionEffects:
                 if p.x < -4:
                     p.x = 132
 
+                drop_length = max(3.0, p.life)
                 oled.line(
                     p.x,
                     p.y,
-                    p.x - 2.0,
-                    p.y + 6.0,
-                    dim_color(BLUE, 0.70 * sad_i),
+                    p.x - drop_length * 0.28,
+                    p.y + drop_length,
+                    dim_color(p.color, 0.90 * sad_i),
                     p.size,
                 )
 
@@ -696,6 +816,43 @@ class EmotionEffects:
                 dim_color(p.color, fade),
                 p.size,
             )
+
+        if shy_i > 0.01:
+            blush = dim_color(MAGENTA, 0.38 * shy_i)
+            for x in (18, 110):
+                oled.circle(x, 45, 1.4, blush)
+                oled.circle(x + (2 if x < 64 else -2), 46.5, 0.8, blush)
+
+        if confused_i > 0.01:
+            q = dim_color(YELLOW, 0.65 * confused_i)
+            for offset in (0.0, 11.0):
+                x = 100 + offset
+                oled.line(x, 13, x + 3, 10, q, 0.75)
+                oled.line(x + 3, 10, x + 6, 12, q, 0.75)
+                oled.line(x + 6, 12, x + 3, 16, q, 0.75)
+                oled.line(x + 3, 16, x + 3, 19, q, 0.75)
+                oled.circle(x + 3, 22, 0.8, q)
+
+        if scared_i > 0.01:
+            sweat = dim_color(BLUE, 0.70 * scared_i)
+            for x, phase in ((20, 0.0), (108, 1.2)):
+                y = 18 + math.sin(now * 4.0 + phase) * 2.0
+                oled.line(x, y, x - 1.2, y + 5.5, sweat, 0.9)
+                oled.circle(x - 1.2, y + 6.0, 1.0, sweat)
+
+        if proud_i > 0.01:
+            star = dim_color(YELLOW, 0.65 * proud_i)
+            for index in range(4):
+                angle = now * 0.45 + math.tau * index / 4.0
+                x = 64 + math.cos(angle) * 48
+                y = 31 + math.sin(angle) * 22
+                oled.line(x - 2, y, x + 2, y, star, 0.7)
+                oled.line(x, y - 2, x, y + 2, star, 0.7)
+
+        if bored_i > 0.01:
+            dots = dim_color(CYAN, 0.42 * bored_i)
+            for index in range(3):
+                oled.circle(56 + index * 8, 56, 1.1, dots)
 
         if dizzy_i > 0.01:
             for index in range(8):
