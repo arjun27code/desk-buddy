@@ -2629,39 +2629,34 @@ def main() -> int:
             screen_w = int(dims[0])
             screen_h = int(dims[1])
 
-            # Modern glass-like overlays. The animation owns the whole screen;
-            # UI only occupies small floating chips rather than giant text
-            # layers stretched across the activity.
-            caption_h = max(78, min(116, int(screen_h * 0.075)))
-            caption_w = max(280, screen_w - 48)
-            caption_view.setabsoluteposition(True)
-            caption_view.setdimensions(caption_w, caption_h)
-            caption_view.setposition(
-                24,
-                max(12, screen_h - caption_h - 42),
+            # termuxgui 0.1.6 does not expose arbitrary absolute positioning
+            # for normal Views. Keep these overlays MATCH_PARENT and use the
+            # supported TextView gravity + margins API. They stay transparent
+            # so the native animation remains full-screen.
+            caption_view.setdimensions(
+                tg.View.MATCH_PARENT,
+                tg.View.MATCH_PARENT,
             )
-            caption_view.setgravity(1, 1)
-            caption_view.setpadding(18, 10, 18, 10)
-            caption_view.setbackgroundcolor(0xB0101A22)
+            caption_view.setgravity(1, 2)
+            caption_view.setmargin(28, "left")
+            caption_view.setmargin(28, "right")
+            caption_view.setmargin(34, "bottom")
 
-            time_view.setabsoluteposition(True)
-            time_view.setdimensions(118, 50)
-            time_view.setposition(
-                max(12, screen_w - 138),
-                18,
+            time_view.setdimensions(
+                tg.View.MATCH_PARENT,
+                tg.View.MATCH_PARENT,
             )
-            time_view.setgravity(1, 1)
-            time_view.setbackgroundcolor(0x70101920)
+            time_view.setgravity(2, 0)
+            time_view.setmargin(22, "top")
+            time_view.setmargin(24, "right")
 
-            status_view.setabsoluteposition(True)
             status_view.setdimensions(
-                min(230, max(150, screen_w // 2)),
-                50,
+                tg.View.MATCH_PARENT,
+                tg.View.MATCH_PARENT,
             )
-            status_view.setposition(18, 18)
-            status_view.setgravity(0, 1)
-            status_view.setpadding(12, 0, 8, 0)
-            status_view.setbackgroundcolor(0x50101920)
+            status_view.setgravity(0, 0)
+            status_view.setmargin(22, "top")
+            status_view.setmargin(20, "left")
 
             buffer_w, buffer_h = choose_buffer_size(screen_w, screen_h)
             buffer = tg.Buffer(connection, buffer_w, buffer_h)
