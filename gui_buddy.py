@@ -1519,7 +1519,11 @@ class RoboEyesFace:
 
         self.scenes.update(
             now,
-            allow_random=s.mood_name == "idle" and s.manual_until == 0.0,
+            allow_random=(
+                s.mood_name == "idle"
+                and s.manual_until == 0.0
+                and not s.camera_present
+            ),
             sleeping=False,
         )
 
