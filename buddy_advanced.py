@@ -208,6 +208,9 @@ class SceneEngine:
         self.rockets: list[SceneParticle] = []
         self.firework_sparks: list[SceneParticle] = []
         self.last_rocket = 0.0
+        self.peek_side = 1
+        self.next_lightning = now + random.uniform(2.2, 5.0)
+        self.lightning_until = 0.0
 
     def force(self, scene: str, duration: float | None = None) -> None:
         if scene not in self.SCENES:
@@ -222,6 +225,10 @@ class SceneEngine:
         if scene == "rain":
             self.rain_mode = random.choice(["slow", "medium", "fast"])
             self.rain.clear()
+            self.next_lightning = now + random.uniform(2.0, 4.8)
+
+        if scene == "peek":
+            self.peek_side = random.choice([-1, 1])
 
         self.voice.say(random.choice(self.SCENE_LINES[scene]))
 
@@ -242,6 +249,48 @@ class SceneEngine:
 
         choices = [s for s in self.SCENES if s != self.last_scene]
         self.force(random.choice(choices))
+
+    def _gradient(
+        self,
+        canvas,
+        top: tuple[int, int, int, int],
+        bottom: tuple[int, int, int, int],
+        start_y: int = 0,
+        end_y: int | None = None,
+    ) -> None:
+        end = canvas.height if end_y is None else max(start_y + 1, end_y)
+        span = max(1, end - start_y)
+
+        for y in range(start_y, min(canvas.height, end)):
+            t = (y - start_y) / span
+            color = (
+                int(top[0] + (bottom[0] - top[0]) * t),
+                int(top[1] + (bottom[1] - top[1]) * t),
+                int(top[2] + (bottom[2] - top[2]) * t),
+                255,
+            )
+            canvas.span(y, 0, canvas.width, color)
+
+    def _cloud(
+        self,
+        canvas,
+        x: float,
+        y: float,
+        size: float,
+        strength: float = 0.18,
+    ) -> None:
+        color = dim_color(WHITE, strength)
+        canvas.circle(x, y, size * 0.30, color)
+        canvas.circle(x + size * 0.25, y - size * 0.12, size * 0.38, color)
+        canvas.circle(x + size * 0.56, y, size * 0.31, color)
+        canvas.rounded_rect(
+            x - size * 0.16,
+            y,
+            size * 0.92,
+            size * 0.34,
+            size * 0.12,
+            color,
+        )
 
     def _draw_stars(self, canvas, now: float, count: int = 22) -> None:
         for index in range(count):
