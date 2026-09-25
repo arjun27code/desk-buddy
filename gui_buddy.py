@@ -2890,9 +2890,9 @@ def main() -> int:
                 tg.View.MATCH_PARENT,
                 tg.View.MATCH_PARENT,
             )
-            time_view.setgravity(2, 0)
+            time_view.setgravity(1, 0)
             time_view.setmargin(22, "top")
-            time_view.setmargin(24, "right")
+            time_view.setmargin(0, "right")
 
             status_view.setdimensions(
                 tg.View.MATCH_PARENT,
