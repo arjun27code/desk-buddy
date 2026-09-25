@@ -39,6 +39,8 @@ if ! "$PYTHON_BIN" -c "import cv2, numpy" >/dev/null 2>&1; then
   echo "Installing local OpenCV vision support..."
   pkg install x11-repo -y
 
+  pkg install dbus -y
+
   if ! pkg install opencv-python python-numpy -y; then
     echo
     echo "WARNING: OpenCV could not be installed automatically."
