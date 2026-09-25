@@ -2429,10 +2429,33 @@ def main() -> int:
                 0xFF00FFFF,
             )
 
-            image = tg.ImageView(activity)
+            root = tg.FrameLayout(activity)
+            root.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
+            root.setbackgroundcolor(0xFF000000)
+
+            image = tg.ImageView(activity, parent=root)
             image.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
             image.setbackgroundcolor(0xFF000000)
             image.sendtouchevent(True)
+
+            caption_view = tg.TextView(activity, "", parent=root)
+            caption_view.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
+            caption_view.settextcolor(0xFFF2FFFF)
+            caption_view.settextsize(17)
+            caption_view.setgravity(1, 2)
+            caption_view.setmargin(26, "left")
+            caption_view.setmargin(26, "right")
+            caption_view.setmargin(34, "bottom")
+            caption_view.setclickable(False)
+
+            time_view = tg.TextView(activity, "", parent=root)
+            time_view.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
+            time_view.settextcolor(0xFF66F7FA)
+            time_view.settextsize(16)
+            time_view.setgravity(2, 0)
+            time_view.setmargin(22, "top")
+            time_view.setmargin(24, "right")
+            time_view.setclickable(False)
 
             dims = [0, 0]
             for _ in range(200):
@@ -2449,6 +2472,7 @@ def main() -> int:
             image.setbuffer(buffer)
 
             face = RoboEyesFace()
+            face.voice.say("Desk Buddy online.", force=True)
             stop = threading.Event()
 
             with buffer as mem:
@@ -2466,6 +2490,8 @@ def main() -> int:
                 sensor_feed.start()
 
                 next_frame = time.monotonic()
+                last_caption = None
+                last_clock = None
 
                 while not stop.is_set():
                     now = time.monotonic()
@@ -2475,6 +2501,16 @@ def main() -> int:
 
                     buffer.blit()
                     image.refresh()
+
+                    caption = face.voice.caption()
+                    if caption != last_caption:
+                        caption_view.settext(caption)
+                        last_caption = caption
+
+                    clock = time_label()
+                    if clock != last_clock:
+                        time_view.settext(clock)
+                        last_clock = clock
 
                     next_frame += FRAME_TIME
                     delay = next_frame - time.monotonic()
