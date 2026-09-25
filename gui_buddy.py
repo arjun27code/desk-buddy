@@ -2681,7 +2681,7 @@ def draw_camera_preview(
 
     max_width = max(
         72,
-        int(canvas.width * 0.30),
+        int(canvas.width * 0.34),
     )
 
     if width > max_width:
