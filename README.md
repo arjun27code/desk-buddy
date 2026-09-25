@@ -175,3 +175,80 @@ If `termux-sensor` exists but returns nothing, confirm that the Termux:API Andro
     desk_buddy.py    old terminal fallback
     start.sh         launcher
     install.sh       installer
+
+
+## Advanced companion runtime
+
+The current native version also includes:
+
+- Android TTS through `termux-tts-speak`
+- synchronized native captions at the bottom of the screen
+- a live clock in the top-right corner
+- full-screen scene engine
+- full-screen sad rain
+- full-screen happy rocket fireworks
+- bike ride scene
+- car drive scene
+- walking scene
+- park/bench scene
+- rainbow scene
+- ambient rain scene
+- autonomous sleep
+- shake-to-wake
+- accelerometer + gyroscope complementary fusion
+- sensor-name discovery using `termux-sensor -l`
+
+### Scene behavior
+
+Scenes appear autonomously while Desk Buddy is idle. They do not interrupt an active emotion.
+
+Bike mode uses a moving road, lane motion and handlebar/wheel cues.
+
+Car mode uses a moving perspective road, dashboard and steering wheel.
+
+Walk mode scrolls trees and ground details.
+
+Park mode shows a tree, bench and bird motion.
+
+Rainbow mode renders a multi-colour arc behind the face.
+
+Rain mode uses full-screen drops rather than restricting rain to the 128x64 face area.
+
+### Speech and captions
+
+Whenever Desk Buddy says something, the same phrase is shown as a caption near the bottom of the native activity.
+
+Speech uses:
+
+    termux-tts-speak
+
+Captions still work even if Android TTS is unavailable.
+
+### Sleep and wake
+
+Desk Buddy can enter a real sleep state with closed eyes and a night background.
+
+A strong physical shake wakes it up and triggers a short surprised wake reaction.
+
+Touching the sleeping face also wakes it.
+
+### Sensor fusion
+
+The motion system now discovers the actual sensor names reported by the phone and requests those names from Termux:API.
+
+Tilt uses a complementary filter:
+
+- gyroscope handles fast angular motion
+- accelerometer gravity corrects gyroscope drift
+
+Shake detection uses both acceleration jerk and gyroscope angular speed.
+
+Useful checks:
+
+    termux-sensor -l
+
+and:
+
+    termux-sensor -s Accelerometer,Gyroscope -d 100 -n 10
+
+If the phone uses vendor-specific sensor names, Desk Buddy should discover them automatically.
