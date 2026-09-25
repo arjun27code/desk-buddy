@@ -19,8 +19,12 @@ else
   PYTHON_BIN="python3"
 fi
 
-echo "Checking Desk Buddy..."
+echo "Checking Desk Buddy Python files..."
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gui_buddy.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
+
+echo "Installing Termux:GUI Python binding..."
+"$PYTHON_BIN" -m pip install --upgrade termuxgui
 
 LAUNCHER="$PREFIX/bin/desk-buddy"
 
@@ -34,14 +38,13 @@ chmod +x "$LAUNCHER"
 
 echo
 echo "Desk Buddy installed."
-echo "Direct Termux display. No browser and no localhost."
 echo
-echo "Start:"
+echo "Native pixel mode:"
 echo "  desk-buddy"
 echo
-echo "Optional weather fallback city:"
-echo "  desk-buddy --set-city \"Your City\""
+echo "Old terminal fallback:"
+echo "  desk-buddy --terminal"
 echo
-echo "Optional phone battery/location reactions need the Termux:API companion app"
-echo "and this Termux package:"
-echo "  pkg install termux-api"
+echo "IMPORTANT:"
+echo "The native renderer also requires the Termux:GUI Android plugin app."
+echo "Install that plugin from the SAME source as your Termux app."
