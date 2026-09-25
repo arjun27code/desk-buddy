@@ -168,6 +168,7 @@ class SceneEngine:
         self.until = 0.0
         self.next_scene = now + random.uniform(15.0, 30.0)
         self.last_scene = ""
+        self.last_mood = "idle"
         self.road_phase = 0.0
         self.walk_phase = 0.0
         self.rain_mode = "medium"
@@ -549,6 +550,12 @@ class SceneEngine:
         eye_color,
         sleeping: bool,
     ) -> None:
+        if mood != self.last_mood:
+            if mood == "sad":
+                self.rain_mode = random.choice(["slow", "medium", "fast"])
+                self.rain.clear()
+            self.last_mood = mood
+
         if sleeping:
             self.draw_sleep(canvas, now)
             return
