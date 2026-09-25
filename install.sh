@@ -26,6 +26,11 @@ echo "Checking Desk Buddy Python files..."
 echo "Installing Termux:GUI Python binding..."
 "$PYTHON_BIN" -m pip install --upgrade termuxgui
 
+if ! command -v termux-sensor >/dev/null 2>&1; then
+  echo "Installing Termux:API command package for motion sensors..."
+  pkg install termux-api -y
+fi
+
 LAUNCHER="$PREFIX/bin/desk-buddy"
 
 cat > "$LAUNCHER" <<EOF
@@ -46,5 +51,6 @@ echo "Old terminal fallback:"
 echo "  desk-buddy --terminal"
 echo
 echo "IMPORTANT:"
-echo "The native renderer also requires the Termux:GUI Android plugin app."
-echo "Install that plugin from the SAME source as your Termux app."
+echo "Native graphics require the Termux:GUI Android plugin app."
+echo "Shake + tilt reactions require the Termux:API Android plugin app."
+echo "Install both plugins from the SAME source as your Termux app."
