@@ -63,6 +63,40 @@ The native renderer keeps the RoboEyes geometry, but emotion entry animations no
 
 This is intentionally an animation-language adaptation, not a copy of another animation's artwork or frames.
 
+## Expanded emotion system
+
+Desk Buddy now has a larger autonomous emotion set:
+
+- happy
+- curious
+- annoyed
+- sad
+- surprised
+- sleepy
+- love
+- excited
+- shy
+- confused
+- scared
+- proud
+- bored
+- dizzy
+
+Autonomous emotions are selected randomly instead of following a fixed loop, and their hold times and transition speeds vary slightly so the behavior feels less mechanical.
+
+Emotion details now include:
+
+- Sad: rain intensity randomly shifts between slow, medium and fast while the emotion is active. Rain uses a darker shade of the current eye color.
+- Happy: proper sky rockets launch from below, leave trails and burst into multicolor fireworks behind the eyes.
+- Shy: lowered glance, compressed eyes and soft blush dots.
+- Confused: asymmetric eye geometry plus question-mark accents.
+- Scared: tall narrow eyes, tremble and sweat-drop accents.
+- Proud: lifted gaze, controlled happy lids and orbiting star glints.
+- Bored: half-lidded slow drift with a small ellipsis.
+- Wave: a tiny hand occasionally appears and waves. The eyes temporarily look toward the hand, then return to idle.
+
+The random autonomous scheduler waits between expressions, lets the current expression finish, and keeps sensor reactions such as Dizzy as higher-priority interrupts.
+
 ## Motion sensors
 
 Desk Buddy can react to the physical phone through Termux:API.
