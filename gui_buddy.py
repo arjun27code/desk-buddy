@@ -1099,7 +1099,10 @@ class RoboEyesFace:
             "proud": 0.80,
             "bored": 1.30,
         }
-        s.transition_duration = transition_map.get(mood, 0.7)
+        s.transition_duration = transition_map.get(mood, 0.7) * random.uniform(
+            0.88,
+            1.14,
+        )
 
         if mood == "idle":
             s.mood_until = 0.0
@@ -1110,7 +1113,14 @@ class RoboEyesFace:
             s.next_auto_emotion = now + random.uniform(7.0, 17.0)
             return
 
-        s.mood_until = now + (hold if hold is not None else EMOTION_HOLD)
+        if hold is not None:
+            active_hold = hold
+        else:
+            active_hold = random.uniform(
+                max(4.6, EMOTION_HOLD - 0.8),
+                EMOTION_HOLD + 2.4,
+            )
+        s.mood_until = now + active_hold
 
         if mood == "happy":
             self.set_mood("happy")
