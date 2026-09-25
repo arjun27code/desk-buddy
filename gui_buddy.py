@@ -12,6 +12,14 @@ import time
 from dataclasses import dataclass
 from typing import Iterable
 
+from buddy_advanced import (
+    BuddyVoice,
+    SceneEngine,
+    SensorFusion,
+    discover_sensor_request,
+    time_label,
+)
+
 try:
     import termuxgui as tg
 except ModuleNotFoundError:
@@ -48,6 +56,23 @@ EMOTION_CYCLE = [
     "proud",
     "bored",
 ]
+
+EMOTION_LINES = {
+    "happy": ["I feel good today.", "This is a good moment.", "Okay, I am happy."],
+    "curious": ["What is that?", "I need to inspect this.", "Something caught my eye."],
+    "annoyed": ["I am mildly annoyed.", "That was unnecessary.", "My patience is tiny."],
+    "sad": ["I feel a little sad.", "Rain fits the mood.", "I need a quiet minute."],
+    "surprised": ["Wait. What?", "I did not expect that.", "Attention acquired."],
+    "sleepy": ["I am getting sleepy.", "Nap calculations started.", "My eyes are heavy."],
+    "love": ["You are acceptable company.", "Friend detected.", "This is nice."],
+    "excited": ["This is exciting!", "Energy level maximum.", "I am very awake now."],
+    "shy": ["Do not stare.", "I am being shy.", "This is slightly embarrassing."],
+    "confused": ["I am confused.", "That does not compute yet.", "Give me a second."],
+    "scared": ["That startled me.", "I am a little scared.", "Please stop doing that."],
+    "proud": ["I did that well.", "Tiny robot, respectable performance.", "I am proud of that."],
+    "bored": ["I am bored.", "Nothing is happening.", "Entertainment levels are low."],
+    "dizzy": ["Everything is spinning.", "Too much motion.", "I am dizzy."],
+}
 
 AUTO_EMOTION_POOL = [
     "happy",
