@@ -19,7 +19,6 @@ from buddy_advanced import (
     discover_sensor_request,
     time_label,
 )
-from doodle_show import DoodleShow
 from game_hub import GameHub
 from oled_asset_show import OledAssetShow
 
@@ -2463,100 +2462,115 @@ def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
     return width, height
 
 
-def draw_camera_preview(
+def draw_desk_shell(
     canvas: PixelCanvas,
-    vision,
+    now: float,
+    active_mode: str,
 ) -> None:
-    if (
-        not vision.available
-        or not vision.preview_rgba
-        or vision.preview_width <= 0
-        or vision.preview_height <= 0
-    ):
-        return
+    """Original compact robot-console treatment for the phone display.
 
-    width = int(vision.preview_width)
-    height = int(vision.preview_height)
+    The external ARNAB project uses a small TFT inside a physical desk-robot
+    enclosure. This keeps that hardware-console spirit without copying its CAD
+    or artwork.
+    """
 
-    max_width = max(
-        72,
-        int(canvas.width * 0.34),
+    w = canvas.width
+    h = canvas.height
+    margin = max(8, int(w * 0.028))
+    corner = max(16, int(w * 0.070))
+    line = dim_color(CYAN, 0.18)
+
+    # Four restrained chassis corners.
+    canvas.line(
+        margin,
+        margin,
+        margin + corner,
+        margin,
+        line,
+        2,
+    )
+    canvas.line(
+        margin,
+        margin,
+        margin,
+        margin + corner,
+        line,
+        2,
+    )
+    canvas.line(
+        w - margin - corner,
+        margin,
+        w - margin,
+        margin,
+        line,
+        2,
+    )
+    canvas.line(
+        w - margin,
+        margin,
+        w - margin,
+        margin + corner,
+        line,
+        2,
+    )
+    canvas.line(
+        margin,
+        h - margin,
+        margin + corner,
+        h - margin,
+        line,
+        2,
+    )
+    canvas.line(
+        margin,
+        h - margin - corner,
+        margin,
+        h - margin,
+        line,
+        2,
+    )
+    canvas.line(
+        w - margin - corner,
+        h - margin,
+        w - margin,
+        h - margin,
+        line,
+        2,
+    )
+    canvas.line(
+        w - margin,
+        h - margin - corner,
+        w - margin,
+        h - margin,
+        line,
+        2,
     )
 
-    if width > max_width:
-        # CameraVision already produces a small thumbnail, so this should be
-        # rare. Skip runtime resampling rather than burning phone CPU.
-        return
+    # Tiny status lamps, echoing a physical electronics enclosure.
+    pulse = 0.55 + 0.25 * math.sin(now * 2.2)
+    lamp_y = margin + 8
+    for index, strength in enumerate((pulse, 0.34, 0.20)):
+        canvas.circle(
+            margin + 8 + index * 12,
+            lamp_y,
+            3,
+            dim_color(CYAN, strength),
+        )
 
-    margin = max(
-        8,
-        int(canvas.width * 0.025),
-    )
-
-    x = canvas.width - width - margin
-    y = margin
-
-    # Subtle frame behind the 40% alpha camera feed.
+    # Bottom touch rail: a visual hint that the display is interactive.
+    rail_w = w * 0.24
+    rail_x = (w - rail_w) / 2.0
+    rail_y = h - margin - 7
     canvas.rounded_rect(
-        x - 4,
-        y - 4,
-        width + 8,
-        height + 8,
-        8,
-        dim_color(CYAN, 0.16),
-    )
-    canvas.rect(
-        x - 1,
-        y - 1,
-        width + 2,
-        height + 2,
-        dim_color(BLACK, 0.88),
-    )
-
-    canvas.blend_rgba(
-        x,
-        y,
-        width,
-        height,
-        vision.preview_rgba,
-        alpha=0.40,
-    )
-
-    # Tiny corner markers make the preview read as a deliberate camera HUD.
-    marker = max(5, width // 12)
-    color = dim_color(CYAN, 0.55)
-
-    canvas.line(
-        x,
-        y,
-        x + marker,
-        y,
-        color,
-        1,
-    )
-    canvas.line(
-        x,
-        y,
-        x,
-        y + marker,
-        color,
-        1,
-    )
-    canvas.line(
-        x + width - marker,
-        y,
-        x + width,
-        y,
-        color,
-        1,
-    )
-    canvas.line(
-        x + width,
-        y,
-        x + width,
-        y + marker,
-        color,
-        1,
+        rail_x,
+        rail_y,
+        rail_w,
+        3,
+        2,
+        dim_color(
+            MAGENTA if active_mode.startswith("GAME") else CYAN,
+            0.24,
+        ),
     )
 
 
@@ -2565,6 +2579,9 @@ def event_worker(
     image_view,
     face: RoboEyesFace,
     oled: VirtualOLED,
+    game_hub: GameHub,
+    screen_w: int,
+    screen_h: int,
     stop: threading.Event,
 ) -> None:
     try:
@@ -2598,8 +2615,36 @@ def event_worker(
             except (KeyError, TypeError, ValueError):
                 continue
 
+            nx = clamp(
+                x / max(1.0, float(screen_w)),
+                0.0,
+                1.0,
+            )
+            ny = clamp(
+                y / max(1.0, float(screen_h)),
+                0.0,
+                1.0,
+            )
+
             with face.lock:
-                face.on_touch(action, x, y, oled)
+                if game_hub.active:
+                    game_hub.handle_touch(
+                        action,
+                        nx,
+                        ny,
+                    )
+                    continue
+
+                result = face.on_touch(
+                    action,
+                    x,
+                    y,
+                    oled,
+                )
+
+                if result == "games":
+                    face.scenes.current = ""
+                    game_hub.open()
 
     except Exception:
         stop.set()
@@ -2607,7 +2652,6 @@ def event_worker(
 
 def main() -> int:
     sensor_feed = None
-    camera_vision = None
     test_oled = "--test-oled" in sys.argv[1:]
 
     try:
@@ -2707,9 +2751,8 @@ def main() -> int:
             image.setbuffer(buffer)
 
             face = RoboEyesFace()
-            doodle_show = DoodleShow()
+            game_hub = GameHub()
             oled_asset_show = OledAssetShow()
-            camera_vision = CameraVision(interval=1.15)
 
             face.voice.say(
                 "Desk Buddy online.",
@@ -2723,15 +2766,22 @@ def main() -> int:
 
                 watcher = threading.Thread(
                     target=event_worker,
-                    args=(connection, image, face, oled, stop),
+                    args=(
+                        connection,
+                        image,
+                        face,
+                        oled,
+                        game_hub,
+                        screen_w,
+                        screen_h,
+                        stop,
+                    ),
                     daemon=True,
                 )
                 watcher.start()
 
                 sensor_feed = SensorFeed(face)
                 sensor_feed.start()
-
-                camera_vision.start()
 
                 if test_oled:
                     if oled_asset_show.start():
@@ -2755,43 +2805,20 @@ def main() -> int:
                 while not stop.is_set():
                     now = time.monotonic()
 
-                    vision = camera_vision.snapshot()
-
-                    right_hand_five = camera_vision.consume_right_hand_five()
-                    boredom = camera_vision.consume_boredom()
-
                     with face.lock:
-                        face.set_camera_attention(
-                            vision.face_present,
-                            vision.face_x,
-                            vision.face_y,
-                        )
+                        action = game_hub.consume_action()
 
-                        if (
-                            boredom
-                            and not doodle_show.active
-                            and not oled_asset_show.active
-                        ):
-                            face.camera_bored_reaction()
-
-                        if right_hand_five:
-                            print(
-                                "Desk Buddy vision: right-hand open palm confirmed "
-                                f"(confidence={vision.open_palm_confidence:.2f})"
-                            )
-
-                            if face.state.sleeping:
-                                face.wake_up()
+                        if action == "oled_show":
+                            game_hub.close()
 
                             if oled_asset_show.start():
-                                doodle_show.stop()
                                 print(
                                     "Desk Buddy OLED: playing "
                                     f"{oled_asset_show.total_frames} frames from "
                                     f"{oled_asset_show.source_label()}"
                                 )
                                 face.voice.say(
-                                    "Right hand detected. Playing your OLED animation.",
+                                    "Playing your OLED animation.",
                                     force=True,
                                 )
                             else:
@@ -2799,9 +2826,8 @@ def main() -> int:
                                     "Desk Buddy OLED load failed: "
                                     f"{oled_asset_show.load_error}"
                                 )
-                                doodle_show.start()
                                 face.voice.say(
-                                    "Right hand detected. Local OLED frames are missing, so I am using the fallback show.",
+                                    "I could not load the OLED animation.",
                                     force=True,
                                 )
 
@@ -2811,28 +2837,51 @@ def main() -> int:
                                     "happy",
                                     3.5,
                                 )
-                                face.draw(canvas, oled, now)
-
-                        elif doodle_show.active:
-                            if not doodle_show.draw(canvas, now):
-                                face.set_emotion(
-                                    "happy",
-                                    3.5,
+                                face.draw(
+                                    canvas,
+                                    oled,
+                                    now,
                                 )
-                                face.draw(canvas, oled, now)
+                                draw_desk_shell(
+                                    canvas,
+                                    now,
+                                    "BUDDY",
+                                )
+
+                        elif game_hub.active:
+                            game_hub.draw(
+                                canvas,
+                                now,
+                            )
+                            draw_desk_shell(
+                                canvas,
+                                now,
+                                "GAME",
+                            )
 
                         else:
-                            face.draw(canvas, oled, now)
-
-                    draw_camera_preview(
-                        canvas,
-                        vision,
-                    )
+                            face.draw(
+                                canvas,
+                                oled,
+                                now,
+                            )
+                            draw_desk_shell(
+                                canvas,
+                                now,
+                                "BUDDY",
+                            )
 
                     buffer.blit()
                     image.refresh()
 
-                    caption = face.voice.caption()
+                    if game_hub.active:
+                        caption = (
+                            game_hub.caption(now)
+                            or "Top-left corner goes back."
+                        )
+                    else:
+                        caption = face.voice.caption()
+
                     if caption != last_caption:
                         caption_view.settext(caption)
                         last_caption = caption
@@ -2843,30 +2892,18 @@ def main() -> int:
                         last_clock = clock
 
                     with face.lock:
-                        if face.state.sleeping:
+                        if game_hub.active:
+                            mode_label = game_hub.status_label()
+                        elif face.state.sleeping:
                             mode_label = "SLEEP"
                         elif oled_asset_show.active:
                             mode_label = "OLED SHOW"
-                        elif doodle_show.active:
-                            mode_label = "DOODLE"
                         elif face.scenes.current:
                             mode_label = face.scenes.current.upper()
                         else:
                             mode_label = face.state.mood_name.upper()
 
-                    if vision.available:
-                        if vision.right_hand_five_fingers:
-                            camera_label = "CAM● RH5"
-                        elif vision.right_hand_candidate:
-                            camera_label = (
-                                f"CAM RH{max(1, vision.finger_count)}?"
-                            )
-                        else:
-                            camera_label = "CAM●" if vision.face_present else "CAM"
-                    else:
-                        camera_label = "CAM OFF"
-
-                    status = f"{camera_label}   {mode_label}"
+                    status = mode_label
                     if status != last_status:
                         status_view.settext(status)
                         last_status = status
@@ -2889,9 +2926,6 @@ def main() -> int:
         return 3
 
     finally:
-        if camera_vision is not None:
-            camera_vision.stop()
-
         if sensor_feed is not None:
             sensor_feed.stop()
 
