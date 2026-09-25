@@ -689,24 +689,74 @@ class SceneEngine:
         canvas.line(bird_x, bird_y - 5, bird_x + 10, bird_y, dim_color(WHITE, 0.28), 2)
 
     def _draw_rainbow(self, canvas, now: float) -> None:
+        self._gradient(
+            canvas,
+            (4, 19, 32, 255),
+            (0, 4, 12, 255),
+        )
+
         colors = [RED, ORANGE, YELLOW, GREEN, CYAN, BLUE, PURPLE]
         cx = canvas.width / 2.0
-        cy = canvas.height * 0.59
-        base = canvas.width * 0.43
-        thickness = max(4, int(canvas.width * 0.012))
+        cy = canvas.height * 0.68
+        base = canvas.width * 0.47
+        thickness = max(5, int(canvas.width * 0.014))
+
+        # Soft halo under the rainbow makes it read on a tall phone screen.
+        canvas.circle(
+            cx,
+            cy,
+            base * 1.04,
+            dim_color(WHITE, 0.018),
+        )
+        canvas.circle(
+            cx,
+            cy,
+            base * 0.94,
+            BLACK,
+        )
 
         for index, color in enumerate(colors):
-            radius = base - index * thickness * 1.6
+            radius = base - index * thickness * 1.55
+            shimmer = 0.34 + 0.07 * math.sin(now * 1.7 + index)
+
             for angle_deg in range(202, 339, 2):
                 angle = math.radians(angle_deg)
                 x = cx + math.cos(angle) * radius
-                y = cy + math.sin(angle) * radius * 0.66
+                y = cy + math.sin(angle) * radius * 0.67
                 canvas.circle(
                     x,
                     y,
-                    thickness * 0.72,
-                    dim_color(color, 0.24 + 0.04 * math.sin(now + index)),
+                    thickness * 0.70,
+                    dim_color(color, shimmer),
                 )
+
+        self._cloud(
+            canvas,
+            canvas.width * 0.03,
+            canvas.height * 0.61,
+            canvas.width * 0.26,
+            0.26,
+        )
+        self._cloud(
+            canvas,
+            canvas.width * 0.73,
+            canvas.height * 0.61,
+            canvas.width * 0.26,
+            0.26,
+        )
+
+        # A few glints rather than turning the rainbow into a disco poster.
+        for index in range(8):
+            angle = now * 0.35 + math.tau * index / 8.0
+            radius = base * 0.78
+            x = cx + math.cos(angle) * radius
+            y = cy + math.sin(angle) * radius * 0.66
+            canvas.circle(
+                x,
+                y,
+                2 + index % 2,
+                dim_color(WHITE, 0.20 + 0.08 * math.sin(now * 2.0 + index)),
+            )
 
     def _draw_sunny(self, canvas, now: float) -> None:
         self._gradient(
@@ -1115,7 +1165,18 @@ class SceneEngine:
         elif self.current == "rainbow":
             self._draw_rainbow(canvas, now)
         elif self.current == "rain":
-            self.draw_fullscreen_rain(canvas, dt, eye_color)
+            self._draw_rain_atmosphere(
+                canvas,
+                now,
+                dt,
+                eye_color,
+            )
+        elif self.current == "sunny":
+            self._draw_sunny(canvas, now)
+        elif self.current == "night":
+            self._draw_night(canvas, now)
+        elif self.current == "peek":
+            self._draw_peek(canvas, now)
 
         # Emotion overlays take priority over the ambient scene.
         if mood == "sad":
