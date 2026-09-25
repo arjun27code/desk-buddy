@@ -428,52 +428,205 @@ class SceneEngine:
             )
 
     def _draw_bike(self, canvas, now: float) -> None:
-        self._draw_road(canvas, now, 0.95)
-        bob = math.sin(now * 7.5) * 3.0
-        y = canvas.height * 0.84 + bob
-        left = canvas.width * 0.30
-        right = canvas.width * 0.70
-        handle_color = dim_color(CYAN, 0.55)
+        self._gradient(
+            canvas,
+            (2, 12, 20, 255),
+            (0, 2, 7, 255),
+            0,
+            int(canvas.height * 0.72),
+        )
 
-        canvas.line(left, y, canvas.width * 0.44, y - 28, handle_color, 4)
-        canvas.line(right, y, canvas.width * 0.56, y - 28, handle_color, 4)
+        # Far skyline and trees move slower than the road for parallax.
+        horizon = int(canvas.height * 0.42)
+        city_phase = (now * 22.0) % 92.0
+        for index in range(8):
+            x = index * 92 - city_phase
+            h = 38 + (index * 19) % 78
+            canvas.rect(
+                x,
+                horizon - h,
+                48 + (index % 3) * 13,
+                h,
+                dim_color(BLUE, 0.09 + (index % 2) * 0.025),
+            )
+
+        for index in range(6):
+            x = (index * 137 - now * 52.0) % (canvas.width + 120) - 60
+            canvas.rect(
+                x,
+                horizon - 45,
+                7,
+                45,
+                dim_color(ORANGE, 0.10),
+            )
+            canvas.circle(
+                x + 3,
+                horizon - 62,
+                24,
+                dim_color(GREEN, 0.14),
+            )
+
+        self._draw_road(canvas, now, 1.10)
+
+        # Speed streaks make the ride read immediately even when the phone is
+        # standing upright on a desk.
+        for index in range(13):
+            y = horizon + ((index * 73 + int(now * 210)) % max(1, int(canvas.height - horizon)))
+            side = -1 if index % 2 == 0 else 1
+            x = canvas.width * (0.18 if side < 0 else 0.82)
+            length = 18 + (index % 4) * 11
+            canvas.line(
+                x,
+                y,
+                x + side * length,
+                y + length * 0.24,
+                dim_color(CYAN, 0.10),
+                2,
+            )
+
+        bob = math.sin(now * 7.5) * 4.0
+        y = canvas.height * 0.84 + bob
+        left = canvas.width * 0.25
+        right = canvas.width * 0.75
+        handle_color = dim_color(CYAN, 0.62)
+
+        # Front-view handlebars and stem.
+        canvas.line(left, y, canvas.width * 0.43, y - 35, handle_color, 5)
+        canvas.line(right, y, canvas.width * 0.57, y - 35, handle_color, 5)
         canvas.line(
-            canvas.width * 0.44,
-            y - 28,
-            canvas.width * 0.56,
-            y - 28,
+            canvas.width * 0.43,
+            y - 35,
+            canvas.width * 0.57,
+            y - 35,
             handle_color,
+            5,
+        )
+        canvas.line(
+            canvas.width * 0.50,
+            y - 35,
+            canvas.width * 0.50,
+            y + 38,
+            dim_color(CYAN, 0.38),
             4,
         )
 
-        for x in (canvas.width * 0.25, canvas.width * 0.75):
-            canvas.circle(x, canvas.height * 0.93, canvas.width * 0.075, dim_color(CYAN, 0.20))
-            canvas.circle(x, canvas.height * 0.93, canvas.width * 0.060, BLACK)
+        # Wheels rotate as subtle rings.
+        for wheel_index, x in enumerate((canvas.width * 0.22, canvas.width * 0.78)):
+            wheel_y = canvas.height * 0.94
+            outer = canvas.width * 0.078
+            canvas.circle(x, wheel_y, outer, dim_color(CYAN, 0.24))
+            canvas.circle(x, wheel_y, outer * 0.80, BLACK)
+
+            for spoke in range(4):
+                angle = now * 4.2 + spoke * math.pi / 2.0 + wheel_index
+                canvas.line(
+                    x,
+                    wheel_y,
+                    x + math.cos(angle) * outer * 0.72,
+                    wheel_y + math.sin(angle) * outer * 0.72,
+                    dim_color(CYAN, 0.18),
+                    1,
+                )
 
     def _draw_car(self, canvas, now: float) -> None:
-        self._draw_road(canvas, now, 1.35)
-        dashboard_y = canvas.height * 0.82
+        self._gradient(
+            canvas,
+            (3, 8, 19, 255),
+            (0, 1, 5, 255),
+            0,
+            int(canvas.height * 0.76),
+        )
+
+        horizon = int(canvas.height * 0.40)
+        city_phase = (now * 38.0) % 110.0
+
+        for index in range(8):
+            x = index * 110 - city_phase
+            building_h = 55 + (index * 27) % 120
+            building_w = 54 + (index % 3) * 18
+            canvas.rect(
+                x,
+                horizon - building_h,
+                building_w,
+                building_h,
+                dim_color(BLUE, 0.10),
+            )
+
+            for row in range(3):
+                for column in range(2):
+                    if (index + row + column + int(now)) % 3 == 0:
+                        canvas.rect(
+                            x + 9 + column * 18,
+                            horizon - building_h + 14 + row * 22,
+                            5,
+                            8,
+                            dim_color(YELLOW, 0.22),
+                        )
+
+        self._draw_road(canvas, now, 1.48)
+
+        # Windshield frame.
+        canvas.line(
+            canvas.width * 0.05,
+            canvas.height * 0.12,
+            canvas.width * 0.18,
+            canvas.height * 0.76,
+            dim_color(CYAN, 0.12),
+            3,
+        )
+        canvas.line(
+            canvas.width * 0.95,
+            canvas.height * 0.12,
+            canvas.width * 0.82,
+            canvas.height * 0.76,
+            dim_color(CYAN, 0.12),
+            3,
+        )
+
+        dashboard_y = canvas.height * 0.80
         canvas.rect(
             0,
             dashboard_y,
             canvas.width,
             canvas.height - dashboard_y,
-            dim_color(CYAN, 0.045),
+            dim_color(CYAN, 0.055),
+        )
+        canvas.line(
+            0,
+            dashboard_y,
+            canvas.width,
+            dashboard_y,
+            dim_color(CYAN, 0.22),
+            2,
         )
 
+        # Steering wheel turns gently.
         wheel_x = canvas.width / 2.0
         wheel_y = canvas.height * 0.90
-        wheel_r = canvas.width * 0.12
-        canvas.circle(wheel_x, wheel_y, wheel_r, dim_color(CYAN, 0.25))
-        canvas.circle(wheel_x, wheel_y, wheel_r * 0.70, BLACK)
-        canvas.line(
-            wheel_x,
-            wheel_y,
-            wheel_x,
-            wheel_y + wheel_r * 0.72,
-            dim_color(CYAN, 0.25),
-            4,
-        )
+        wheel_r = canvas.width * 0.125
+        canvas.circle(wheel_x, wheel_y, wheel_r, dim_color(CYAN, 0.30))
+        canvas.circle(wheel_x, wheel_y, wheel_r * 0.72, BLACK)
+
+        angle = math.sin(now * 0.8) * 0.28
+        for spoke in (0.0, 2.15, 4.15):
+            a = spoke + angle
+            canvas.line(
+                wheel_x,
+                wheel_y,
+                wheel_x + math.cos(a) * wheel_r * 0.68,
+                wheel_y + math.sin(a) * wheel_r * 0.68,
+                dim_color(CYAN, 0.28),
+                4,
+            )
+
+        # Instrument lights.
+        for index, color in enumerate((CYAN, GREEN, YELLOW)):
+            canvas.circle(
+                canvas.width * (0.18 + index * 0.09),
+                dashboard_y + 28,
+                5,
+                dim_color(color, 0.35),
+            )
 
     def _draw_walk(self, canvas, now: float) -> None:
         ground = canvas.height * 0.72
