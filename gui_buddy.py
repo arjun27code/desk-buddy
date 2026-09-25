@@ -38,7 +38,10 @@ except ModuleNotFoundError:
 
 VIRTUAL_W = 128.0
 VIRTUAL_H = 64.0
-FPS = 50.0
+# Termux:GUI's shared-buffer refresh is much happier around 30 FPS than 50
+# FPS on a phone. RoboEyes interpolation still looks smooth while pixel traffic
+# and refresh pressure drop substantially.
+FPS = 30.0
 FRAME_TIME = 1.0 / FPS
 
 # The uploaded OLED animation uses 64 ms frame holds. We keep the native
@@ -2649,17 +2652,20 @@ class SensorFeed:
 
 def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
     if screen_w_px <= 0 or screen_h_px <= 0:
-        return 400, 900
+        return 320, 700
 
-    max_w = 400
+    # Rendering at the physical 1080x2400-ish phone resolution would be
+    # absurdly expensive in pure Python. 320px wide is still crisp for this
+    # stylized UI and cuts the shared-buffer bandwidth by roughly a third.
+    max_w = 320
     scale = min(1.0, max_w / float(screen_w_px))
-    width = max(320, int(round(screen_w_px * scale)))
-    height = max(620, int(round(screen_h_px * scale)))
+    width = max(280, int(round(screen_w_px * scale)))
+    height = max(540, int(round(screen_h_px * scale)))
 
-    if height > 920:
-        factor = 920.0 / height
-        width = max(300, int(round(width * factor)))
-        height = 920
+    if height > 720:
+        factor = 720.0 / height
+        width = max(270, int(round(width * factor)))
+        height = 720
 
     return width, height
 
@@ -2809,6 +2815,7 @@ def event_worker(
 def main() -> int:
     sensor_feed = None
     camera_vision = None
+    test_oled = "--test-oled" in sys.argv[1:]
 
     try:
         with tg.Connection() as connection:
@@ -2909,7 +2916,7 @@ def main() -> int:
             face = RoboEyesFace()
             doodle_show = DoodleShow()
             oled_asset_show = OledAssetShow()
-            camera_vision = CameraVision(interval=1.05)
+            camera_vision = CameraVision(interval=1.15)
 
             face.voice.say(
                 "Desk Buddy online.",
@@ -2932,6 +2939,20 @@ def main() -> int:
                 sensor_feed.start()
 
                 camera_vision.start()
+
+                if test_oled:
+                    if oled_asset_show.start():
+                        print(
+                            "Desk Buddy OLED test: loaded "
+                            f"{oled_asset_show.total_frames} frames from "
+                            f"{oled_asset_show.source_label()} at "
+                            f"{oled_asset_show.frame_seconds * 1000:.0f} ms/frame"
+                        )
+                    else:
+                        print(
+                            "Desk Buddy OLED test failed: "
+                            f"{oled_asset_show.load_error}"
+                        )
 
                 next_frame = time.monotonic()
                 last_caption = None
@@ -2961,16 +2982,30 @@ def main() -> int:
                             face.camera_bored_reaction()
 
                         if right_hand_five:
+                            print(
+                                "Desk Buddy vision: right-hand open palm confirmed "
+                                f"(confidence={vision.open_palm_confidence:.2f})"
+                            )
+
                             if face.state.sleeping:
                                 face.wake_up()
 
                             if oled_asset_show.start():
                                 doodle_show.stop()
+                                print(
+                                    "Desk Buddy OLED: playing "
+                                    f"{oled_asset_show.total_frames} frames from "
+                                    f"{oled_asset_show.source_label()}"
+                                )
                                 face.voice.say(
                                     "Right hand detected. Playing your OLED animation.",
                                     force=True,
                                 )
                             else:
+                                print(
+                                    "Desk Buddy OLED load failed: "
+                                    f"{oled_asset_show.load_error}"
+                                )
                                 doodle_show.start()
                                 face.voice.say(
                                     "Right hand detected. Local OLED frames are missing, so I am using the fallback show.",
@@ -3029,6 +3064,10 @@ def main() -> int:
                     if vision.available:
                         if vision.right_hand_five_fingers:
                             camera_label = "CAM● RH5"
+                        elif vision.right_hand_candidate:
+                            camera_label = (
+                                f"CAM RH{max(1, vision.finger_count)}?"
+                            )
                         else:
                             camera_label = "CAM●" if vision.face_present else "CAM"
                     else:
