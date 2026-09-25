@@ -18,9 +18,4 @@ if [ "${1:-}" = "--terminal" ]; then
   exec "$PYTHON_BIN" "$SCRIPT_DIR/desk_buddy.py" "$@"
 fi
 
-if [ "${1:-}" = "--vision-test" ]; then
-  shift
-  exec "$PYTHON_BIN" "$SCRIPT_DIR/vision_test.py" "$@"
-fi
-
 exec "$PYTHON_BIN" "$SCRIPT_DIR/gui_buddy.py" "$@"
