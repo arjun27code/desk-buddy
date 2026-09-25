@@ -252,3 +252,106 @@ and:
     termux-sensor -s Accelerometer,Gyroscope -d 100 -n 10
 
 If the phone uses vendor-specific sensor names, Desk Buddy should discover them automatically.
+
+
+## Vision, camera attention and five-finger trigger
+
+The advanced native runtime can use the front camera through Termux:API.
+
+Camera behavior:
+
+- discovers the actual front-camera id using `termux-camera-info`
+- captures low-rate local snapshots with `termux-camera-photo`
+- mirrors the image so left/right eye contact feels natural
+- detects the largest visible face locally with OpenCV
+- moves the eyes toward the person's horizontal and vertical position
+- watches a mostly stationary visible person and eventually gets bored
+- boredom can trigger an annoyed reaction, walk, park or screen-edge peek
+- detects a stable open palm / five-finger gesture and starts the special doodle animation
+- camera snapshots are kept only in Termux cache and deleted immediately after each analysis
+
+The camera path is deliberately local. It does not upload photos.
+
+Termux:API exposes still camera capture rather than a continuous native video stream, so face tracking runs at a modest snapshot cadence and the RoboEyes interpolation smooths movement between observations.
+
+### Five-finger animation
+
+The attached 128x64 OLED material was analyzed for its animation language: discrete frame cadence, large expressive eyes, pose-to-pose acting, tiny hand-drawn jitter, body poses and secondary hand/heart motion.
+
+The five-finger trigger starts an original 102-frame doodle sequence at the same 64 ms frame cadence. It does not reproduce lyric text or copy the original bitmap artwork.
+
+## Gibber-style voice
+
+Human TTS is no longer the default audible voice.
+
+Desk Buddy now creates short local FSK-style robotic data chirps and plays them with:
+
+    termux-media-player
+
+The actual human-readable phrase appears in the bottom caption chip.
+
+This is intentionally a GibberLink-style sound aesthetic, not a claim of ggwave/GibberLink wire compatibility.
+
+## Modern scene system
+
+The procedural scenes now use the full application canvas.
+
+Bike:
+- perspective road
+- parallax city/trees
+- speed streaks
+- animated handlebars, stem, wheels and spokes
+
+Car:
+- moving city perspective
+- windshield framing
+- dashboard
+- animated steering wheel
+- instrument lights
+
+Weather:
+- storm clouds arrive before rain
+- rain covers the full screen
+- slow / medium / fast rain modes
+- lightning flash and bolt
+- sunny mode with glowing sun and moving clouds
+- night mode with stars, moon and shooting star
+- full rainbow with clouds, shimmer and glints
+
+Sleep:
+- night gradient
+- stars and moon
+- actual little bed
+- pillow and blanket
+- mini sleeping Buddy
+- floating animated Z marks
+- shake or touch wakes Buddy
+
+Peek:
+- Buddy leans partly beyond the screen edge
+- small gripping fingers appear at the edge
+- curiosity marks animate outside the apparent display boundary
+
+## Camera prerequisites
+
+Camera intelligence additionally needs OpenCV. The installer attempts:
+
+    pkg install x11-repo
+    pkg install opencv-python python-numpy
+
+Checks:
+
+    termux-camera-info
+
+    python -c "import cv2, numpy; print(cv2.__version__)"
+
+The first camera capture may ask Android for Camera permission. Grant it to the Termux:API companion app.
+
+## Update after this release
+
+    cd ~/desk-buddy
+    git pull origin main
+    bash install.sh
+    desk-buddy
+
+Keep the phone reasonably still for the first couple of seconds for motion-sensor calibration.
