@@ -2664,6 +2664,103 @@ def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
     return width, height
 
 
+def draw_camera_preview(
+    canvas: PixelCanvas,
+    vision,
+) -> None:
+    if (
+        not vision.available
+        or not vision.preview_rgba
+        or vision.preview_width <= 0
+        or vision.preview_height <= 0
+    ):
+        return
+
+    width = int(vision.preview_width)
+    height = int(vision.preview_height)
+
+    max_width = max(
+        72,
+        int(canvas.width * 0.30),
+    )
+
+    if width > max_width:
+        # CameraVision already produces a small thumbnail, so this should be
+        # rare. Skip runtime resampling rather than burning phone CPU.
+        return
+
+    margin = max(
+        8,
+        int(canvas.width * 0.025),
+    )
+
+    x = canvas.width - width - margin
+    y = margin
+
+    # Subtle frame behind the 40% alpha camera feed.
+    canvas.rounded_rect(
+        x - 4,
+        y - 4,
+        width + 8,
+        height + 8,
+        8,
+        dim_color(CYAN, 0.16),
+    )
+    canvas.rect(
+        x - 1,
+        y - 1,
+        width + 2,
+        height + 2,
+        dim_color(BLACK, 0.88),
+    )
+
+    canvas.blend_rgba(
+        x,
+        y,
+        width,
+        height,
+        vision.preview_rgba,
+        alpha=0.40,
+    )
+
+    # Tiny corner markers make the preview read as a deliberate camera HUD.
+    marker = max(5, width // 12)
+    color = dim_color(CYAN, 0.55)
+
+    canvas.line(
+        x,
+        y,
+        x + marker,
+        y,
+        color,
+        1,
+    )
+    canvas.line(
+        x,
+        y,
+        x,
+        y + marker,
+        color,
+        1,
+    )
+    canvas.line(
+        x + width - marker,
+        y,
+        x + width,
+        y,
+        color,
+        1,
+    )
+    canvas.line(
+        x + width,
+        y,
+        x + width,
+        y + marker,
+        color,
+        1,
+    )
+
+
 def event_worker(
     connection,
     image_view,
@@ -2749,9 +2846,9 @@ def main() -> int:
             time_view.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
             time_view.settextcolor(0xFF66F7FA)
             time_view.settextsize(16)
-            time_view.setgravity(2, 0)
+            time_view.setgravity(1, 0)
             time_view.setmargin(22, "top")
-            time_view.setmargin(24, "right")
+            time_view.setmargin(0, "right")
             time_view.setclickable(False)
 
             status_view = tg.TextView(activity, "", parent=root)
@@ -2811,6 +2908,7 @@ def main() -> int:
 
             face = RoboEyesFace()
             doodle_show = DoodleShow()
+            oled_asset_show = OledAssetShow()
             camera_vision = CameraVision(interval=1.05)
 
             face.voice.say(
@@ -2845,7 +2943,7 @@ def main() -> int:
 
                     vision = camera_vision.snapshot()
 
-                    five_fingers = camera_vision.consume_five_fingers()
+                    right_hand_five = camera_vision.consume_right_hand_five()
                     boredom = camera_vision.consume_boredom()
 
                     with face.lock:
@@ -2855,27 +2953,53 @@ def main() -> int:
                             vision.face_y,
                         )
 
-                        if boredom and not doodle_show.active:
+                        if (
+                            boredom
+                            and not doodle_show.active
+                            and not oled_asset_show.active
+                        ):
                             face.camera_bored_reaction()
 
-                        if five_fingers:
+                        if right_hand_five:
                             if face.state.sleeping:
                                 face.wake_up()
-                            doodle_show.start()
-                            face.voice.say(
-                                "Five fingers detected. Show time.",
-                                force=True,
-                            )
 
-                        if doodle_show.active:
+                            if oled_asset_show.start():
+                                doodle_show.stop()
+                                face.voice.say(
+                                    "Right hand detected. Playing your OLED animation.",
+                                    force=True,
+                                )
+                            else:
+                                doodle_show.start()
+                                face.voice.say(
+                                    "Right hand detected. Local OLED frames are missing, so I am using the fallback show.",
+                                    force=True,
+                                )
+
+                        if oled_asset_show.active:
+                            if not oled_asset_show.draw(canvas, now):
+                                face.set_emotion(
+                                    "happy",
+                                    3.5,
+                                )
+                                face.draw(canvas, oled, now)
+
+                        elif doodle_show.active:
                             if not doodle_show.draw(canvas, now):
                                 face.set_emotion(
                                     "happy",
                                     3.5,
                                 )
                                 face.draw(canvas, oled, now)
+
                         else:
                             face.draw(canvas, oled, now)
+
+                    draw_camera_preview(
+                        canvas,
+                        vision,
+                    )
 
                     buffer.blit()
                     image.refresh()
@@ -2893,6 +3017,8 @@ def main() -> int:
                     with face.lock:
                         if face.state.sleeping:
                             mode_label = "SLEEP"
+                        elif oled_asset_show.active:
+                            mode_label = "OLED SHOW"
                         elif doodle_show.active:
                             mode_label = "DOODLE"
                         elif face.scenes.current:
@@ -2901,7 +3027,10 @@ def main() -> int:
                             mode_label = face.state.mood_name.upper()
 
                     if vision.available:
-                        camera_label = "CAM●" if vision.face_present else "CAM"
+                        if vision.right_hand_five_fingers:
+                            camera_label = "CAM● RH5"
+                        else:
+                            camera_label = "CAM●" if vision.face_present else "CAM"
                     else:
                         camera_label = "CAM OFF"
 
