@@ -984,6 +984,9 @@ class RoboState:
     dizzy_started: float = 0.0
 
     next_auto_emotion: float = 0.0
+    next_sleep: float = 0.0
+    sleeping: bool = False
+    sleep_started: float = 0.0
     next_wave: float = 0.0
     wave_started: float = 0.0
     wave_until: float = 0.0
@@ -1002,12 +1005,15 @@ class RoboEyesFace:
         self.state = RoboState()
         self.lock = threading.Lock()
         self.effects = EmotionEffects()
+        self.voice = BuddyVoice()
+        self.scenes = SceneEngine(self.voice)
         self.last_draw = time.monotonic()
 
         now = time.monotonic()
         self.state.next_blink = self._next_blink(now)
         self.state.next_idle = self._next_idle(now)
         self.state.next_auto_emotion = now + random.uniform(6.0, 14.0)
+        self.state.next_sleep = now + random.uniform(65.0, 125.0)
         self.state.next_wave = now + random.uniform(12.0, 26.0)
 
     @staticmethod
@@ -1106,6 +1112,9 @@ class RoboEyesFace:
 
         s.mood_name = mood
         s.mood_started = now
+
+        if mood in EMOTION_LINES and random.random() < 0.72:
+            self.voice.say(random.choice(EMOTION_LINES[mood]))
 
         transition_map = {
             "idle": 0.85,
@@ -1285,8 +1294,46 @@ class RoboEyesFace:
             s.eye_r_h_next = 21.0
             s.space_next = 11.0
 
+    def go_to_sleep(self) -> None:
+        s = self.state
+        now = time.monotonic()
+        if s.sleeping:
+            return
+        s.sleeping = True
+        s.sleep_started = now
+        s.mood_name = "sleep"
+        s.mood_until = 0.0
+        s.idle = False
+        s.h_flicker = False
+        s.v_flicker = False
+        s.laugh = False
+        s.eye_l_h_next = 1.0
+        s.eye_r_h_next = 1.0
+        s.eye_l_open = False
+        s.eye_r_open = False
+        self.voice.say("Good night. Shake me when you need me.", force=True)
+
+    def wake_up(self) -> None:
+        s = self.state
+        if not s.sleeping:
+            return
+        s.sleeping = False
+        s.eye_l_open = True
+        s.eye_r_open = True
+        s.eye_l_h_next = s.eye_l_h_default
+        s.eye_r_h_next = s.eye_r_h_default
+        s.next_sleep = time.monotonic() + random.uniform(85.0, 170.0)
+        self.set_emotion("surprised", 2.0)
+        self.voice.say("I am awake!", force=True, pitch=1.26, rate=1.08)
+
+    def handle_shake(self) -> None:
+        if self.state.sleeping:
+            self.wake_up()
+        else:
+            self.trigger_dizzy()
+
     def trigger_dizzy(self) -> None:
-        if self.state.mood_name == "dizzy":
+        if self.state.sleeping or self.state.mood_name == "dizzy":
             return
         self.set_emotion("dizzy", DIZZY_HOLD)
 
@@ -1324,6 +1371,10 @@ class RoboEyesFace:
         s = self.state
         now = time.monotonic()
         vx, vy = oled.phone_to_virtual(x, y)
+
+        if s.sleeping and action == "down":
+            self.wake_up()
+            return
 
         if action == "down":
             s.touch_down_at = now
