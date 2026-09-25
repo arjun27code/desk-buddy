@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from gibber_voice import GibberVoice
+
 
 BLACK = (0, 0, 0, 255)
 CYAN = (18, 238, 242, 255)
@@ -110,6 +112,11 @@ class BuddyVoice:
             return self.caption_text
 
 
+# Keep the public name used by the rest of the project, but switch the audible
+# layer from human TTS to local data-sound chirps. Captions remain real text.
+BuddyVoice = GibberVoice
+
+
 @dataclass
 class SceneParticle:
     x: float
@@ -125,7 +132,17 @@ class SceneParticle:
 class SceneEngine:
     """Full-screen activity/background scenes behind the RoboEyes face."""
 
-    SCENES = ["bike", "car", "walk", "park", "rainbow", "rain"]
+    SCENES = [
+        "bike",
+        "car",
+        "walk",
+        "park",
+        "rainbow",
+        "rain",
+        "sunny",
+        "night",
+        "peek",
+    ]
 
     SCENE_LINES = {
         "bike": [
@@ -157,6 +174,21 @@ class SceneEngine:
             "Rainy day.",
             "I am staying dry in here.",
             "Weather has become dramatic.",
+        ],
+        "sunny": [
+            "The sun came out.",
+            "Suddenly very bright.",
+            "Sunny mode.",
+        ],
+        "night": [
+            "The stars are out.",
+            "Night mode feels quiet.",
+            "Moon inspection.",
+        ],
+        "peek": [
+            "What is outside the screen?",
+            "I am checking the edge.",
+            "There must be something out there.",
         ],
     }
 
