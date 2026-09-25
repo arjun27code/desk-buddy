@@ -958,6 +958,12 @@ class RoboState:
 
     dizzy_started: float = 0.0
 
+    next_auto_emotion: float = 0.0
+    next_wave: float = 0.0
+    wave_started: float = 0.0
+    wave_until: float = 0.0
+    wave_side: int = 1
+
     touch_down_at: float = 0.0
     touch_down_x: float = 0.0
     touch_down_y: float = 0.0
@@ -976,6 +982,8 @@ class RoboEyesFace:
         now = time.monotonic()
         self.state.next_blink = self._next_blink(now)
         self.state.next_idle = self._next_idle(now)
+        self.state.next_auto_emotion = now + random.uniform(6.0, 14.0)
+        self.state.next_wave = now + random.uniform(12.0, 26.0)
 
     @staticmethod
     def _rand_variation(value: int) -> int:
@@ -1022,9 +1030,9 @@ class RoboEyesFace:
 
     def set_mood(self, mood: str) -> None:
         s = self.state
-        s.tired = mood in {"tired", "sleepy"}
-        s.angry = mood == "angry"
-        s.happy = mood in {"happy", "excited"}
+        s.tired = mood in {"tired", "sleepy", "bored", "shy"}
+        s.angry = mood in {"angry", "annoyed"}
+        s.happy = mood in {"happy", "excited", "proud", "love"}
 
     def close(self) -> None:
         s = self.state
@@ -1085,6 +1093,11 @@ class RoboEyesFace:
             "love": 0.70,
             "excited": 0.45,
             "dizzy": 0.30,
+            "shy": 1.00,
+            "confused": 0.85,
+            "scared": 0.38,
+            "proud": 0.80,
+            "bored": 1.30,
         }
         s.transition_duration = transition_map.get(mood, 0.7)
 
@@ -1094,6 +1107,7 @@ class RoboEyesFace:
             self.set_position("DEFAULT")
             s.idle = True
             s.curious = True
+            s.next_auto_emotion = now + random.uniform(7.0, 17.0)
             return
 
         s.mood_until = now + (hold if hold is not None else EMOTION_HOLD)
@@ -1177,10 +1191,83 @@ class RoboEyesFace:
             s.eye_r_h_next = 32.0
             s.space_next = 16.0
 
+        elif mood == "shy":
+            self.set_mood("shy")
+            self.set_position("SW")
+            s.idle = False
+            s.curious = False
+            s.eye_l_h_next = 28.0
+            s.eye_r_h_next = 28.0
+            s.eye_l_w_next = 34.0
+            s.eye_r_w_next = 34.0
+            s.space_next = 13.0
+
+        elif mood == "confused":
+            self.set_mood("default")
+            self.set_position("NE")
+            s.idle = False
+            s.curious = True
+            s.eye_l_h_next = 38.0
+            s.eye_r_h_next = 27.0
+            s.eye_l_w_next = 34.0
+            s.eye_r_w_next = 37.0
+            s.radius_l_next = 9.0
+            s.radius_r_next = 6.0
+            s.space_next = 12.0
+
+        elif mood == "scared":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+            s.eye_l_w_next = 27.0
+            s.eye_r_w_next = 27.0
+            s.eye_l_h_next = 46.0
+            s.eye_r_h_next = 46.0
+            s.radius_l_next = 13.0
+            s.radius_r_next = 13.0
+            s.space_next = 18.0
+
+        elif mood == "proud":
+            self.set_mood("proud")
+            self.set_position("N")
+            s.idle = False
+            s.curious = False
+            s.eye_l_w_next = 38.0
+            s.eye_r_w_next = 38.0
+            s.eye_l_h_next = 30.0
+            s.eye_r_h_next = 30.0
+            s.space_next = 10.0
+
+        elif mood == "bored":
+            self.set_mood("bored")
+            self.set_position("E")
+            s.idle = False
+            s.curious = False
+            s.eye_l_w_next = 38.0
+            s.eye_r_w_next = 38.0
+            s.eye_l_h_next = 21.0
+            s.eye_r_h_next = 21.0
+            s.space_next = 11.0
+
     def trigger_dizzy(self) -> None:
         if self.state.mood_name == "dizzy":
             return
         self.set_emotion("dizzy", DIZZY_HOLD)
+
+    def trigger_wave(self) -> None:
+        s = self.state
+        now = time.monotonic()
+        s.wave_side = random.choice([-1, 1])
+        s.wave_started = now
+        s.wave_until = now + random.uniform(2.4, 3.4)
+        s.next_wave = s.wave_until + random.uniform(15.0, 32.0)
+        s.idle = False
+
+        max_x = self._constraint_x()
+        max_y = self._constraint_y()
+        s.eye_l_x_next = max_x if s.wave_side > 0 else 0.0
+        s.eye_l_y_next = max_y * 0.58
 
     def cycle_emotion(self) -> None:
         s = self.state
@@ -1257,6 +1344,29 @@ class RoboEyesFace:
         if s.mood_name != "idle" and now >= s.mood_until:
             self.set_emotion("idle")
 
+        if (
+            s.mood_name == "idle"
+            and s.manual_until == 0.0
+            and now >= s.next_auto_emotion
+            and now >= s.wave_until
+        ):
+            self.set_emotion(random.choice(AUTO_EMOTION_POOL))
+
+        if (
+            s.mood_name == "idle"
+            and s.manual_until == 0.0
+            and now >= s.next_wave
+            and now >= s.wave_until
+        ):
+            self.trigger_wave()
+
+        if s.wave_until > 0.0 and now >= s.wave_until:
+            s.wave_until = 0.0
+            if s.mood_name == "idle":
+                s.idle = True
+                self.set_position("DEFAULT")
+                s.next_idle = self._next_idle(now)
+
         if s.manual_until and now >= s.manual_until:
             s.manual_until = 0.0
             if s.mood_name == "idle":
@@ -1289,6 +1399,22 @@ class RoboEyesFace:
 
         if s.mood_name == "excited":
             s.v_flicker_amp = 3.0 * transition
+
+        if s.mood_name == "scared":
+            tremble = 1.3 * transition
+            s.h_flicker = True
+            s.h_flicker_amp = tremble
+
+        if s.mood_name == "confused":
+            s.radius_l_next = 10.0 + math.sin(now * 2.2) * 1.2
+            s.radius_r_next = 6.0 + math.cos(now * 2.2) * 1.0
+
+        if s.mood_name == "bored":
+            s.eye_l_y_next = clamp(
+                s.eye_l_y_next + math.sin(now * 0.7) * 0.22,
+                0.0,
+                self._constraint_y(),
+            )
 
         self._update_curiosity()
 
@@ -1439,6 +1565,36 @@ class RoboEyesFace:
         elif s.mood_name == "dizzy":
             dx = math.sin(stepped_age * 15.0) * 1.8 * (1.0 - t)
             dy = math.cos(stepped_age * 12.0) * 1.3 * (1.0 - t)
+
+        elif s.mood_name == "shy":
+            dx = -1.8 * smoothstep(t)
+            dy = 2.4 * smoothstep(t)
+            sx = 1.0 - 0.04 * smoothstep(t)
+            sy = 1.0 - 0.08 * smoothstep(t)
+            gap = 1.5 * smoothstep(t)
+
+        elif s.mood_name == "confused":
+            dx = math.sin(stepped_age * 7.0) * 1.2 * (1.0 - t)
+            gap = 1.7 * spring
+            sx = 1.0 + 0.04 * spring
+            sy = 1.0 - 0.03 * spring
+
+        elif s.mood_name == "scared":
+            pulse = math.sin(t * math.pi * 3.0) * math.exp(-2.7 * t)
+            sx = 1.0 - 0.08 * pulse
+            sy = 1.0 + 0.18 * abs(pulse)
+            gap = 2.5 * abs(pulse)
+
+        elif s.mood_name == "proud":
+            dy = -1.6 * smoothstep(t)
+            sx = 1.0 + 0.05 * spring
+            sy = 1.0 - 0.05 * smoothstep(t)
+            gap = -0.8 * spring
+
+        elif s.mood_name == "bored":
+            dy = 1.5 * smoothstep(t)
+            sy = 1.0 - 0.10 * smoothstep(t)
+            sx = 1.0 + 0.03 * smoothstep(t)
 
         # A tiny anticipatory compression makes the pose feel authored instead
         # of simply tweened. Fade it quickly so it does not distort the hold.
