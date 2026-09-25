@@ -29,7 +29,13 @@ class VisionState:
     face_area: float = 0.0
     stationary_seconds: float = 0.0
     five_fingers: bool = False
+    right_hand_five_fingers: bool = False
     open_palm_confidence: float = 0.0
+    hand_x: float = 0.0
+    hand_y: float = 0.0
+    preview_rgba: bytes = b""
+    preview_width: int = 0
+    preview_height: int = 0
     last_frame_at: float = 0.0
     error: str = ""
 
@@ -60,8 +66,10 @@ class CameraVision:
         self.last_bored_event = 0.0
 
         self.five_streak = 0
+        self.right_five_streak = 0
         self.last_five_event = 0.0
         self.five_event_pending = False
+        self.right_five_event_pending = False
         self.bored_event_pending = False
 
         self.face_detector = None
@@ -128,6 +136,12 @@ class CameraVision:
         with self.lock:
             value = self.five_event_pending
             self.five_event_pending = False
+            return value
+
+    def consume_right_hand_five(self) -> bool:
+        with self.lock:
+            value = self.right_five_event_pending
+            self.right_five_event_pending = False
             return value
 
     def consume_boredom(self) -> bool:
