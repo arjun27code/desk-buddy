@@ -1410,10 +1410,13 @@ class RoboEyesFace:
             s.radius_r_next = 6.0 + math.cos(now * 2.2) * 1.0
 
         if s.mood_name == "bored":
+            max_x = self._constraint_x()
+            max_y = self._constraint_y()
+            s.eye_l_x_next = max_x
             s.eye_l_y_next = clamp(
-                s.eye_l_y_next + math.sin(now * 0.7) * 0.22,
+                max_y / 2.0 + math.sin(now * 0.7) * 0.35,
                 0.0,
-                self._constraint_y(),
+                max_y,
             )
 
         self._update_curiosity()
@@ -1717,6 +1720,104 @@ class RoboEyesFace:
                     0.75,
                 )
 
+    def _draw_wave_hand(
+        self,
+        oled: VirtualOLED,
+        now: float,
+    ) -> None:
+        s = self.state
+        if s.wave_until <= now or s.wave_started <= 0.0:
+            return
+
+        age = now - s.wave_started
+        duration = max(0.1, s.wave_until - s.wave_started)
+        life = clamp(age / duration, 0.0, 1.0)
+
+        # Fade/scale in and out instead of popping a hand onto the display.
+        intro = smoothstep(clamp(life / 0.16, 0.0, 1.0))
+        outro = 1.0 - smoothstep(clamp((life - 0.80) / 0.20, 0.0, 1.0))
+        strength = min(intro, outro)
+        if strength <= 0.01:
+            return
+
+        stepped = stepped_time(age)
+        wave = math.sin(stepped * 8.8) * 3.2
+        bounce = math.sin(stepped * 4.4) * 0.8
+
+        side = 1 if s.wave_side > 0 else -1
+        palm_x = 111.0 if side > 0 else 17.0
+        palm_y = 47.0 + bounce
+
+        hand_color = dim_color(CYAN, 0.92 * strength)
+        soft_color = dim_color(CYAN, 0.45 * strength)
+
+        # Tiny arm from screen edge into the palm.
+        edge_x = 128.0 if side > 0 else 0.0
+        oled.line(
+            edge_x,
+            56.0,
+            palm_x - side * 2.8,
+            palm_y + 3.2,
+            soft_color,
+            2.0,
+        )
+
+        # Palm.
+        oled.rounded_rect(
+            palm_x - 3.8,
+            palm_y - 2.8,
+            7.6,
+            7.8,
+            2.6,
+            hand_color,
+        )
+
+        # Four fingers. The top endpoints oscillate together, producing a
+        # readable wave at OLED scale without turning into a detailed hand icon.
+        finger_base_y = palm_y - 2.0
+        for index, offset in enumerate((-2.5, -0.8, 0.9, 2.5)):
+            finger_wave = wave + (index - 1.5) * 0.45
+            start_x = palm_x + offset
+            end_x = start_x + side * finger_wave * 0.42
+            end_y = palm_y - 7.0 - abs(finger_wave) * 0.18
+            oled.line(
+                start_x,
+                finger_base_y,
+                end_x,
+                end_y,
+                hand_color,
+                1.05,
+            )
+            oled.circle(end_x, end_y, 0.55, hand_color)
+
+        # Thumb.
+        oled.line(
+            palm_x - side * 3.0,
+            palm_y + 0.5,
+            palm_x - side * 6.0,
+            palm_y - 1.0 + wave * 0.10,
+            hand_color,
+            1.1,
+        )
+
+        # Two tiny motion accents around the hand.
+        oled.line(
+            palm_x + side * 6.0,
+            palm_y - 6.0,
+            palm_x + side * (9.0 + wave * 0.12),
+            palm_y - 9.0,
+            soft_color,
+            0.65,
+        )
+        oled.line(
+            palm_x + side * 7.0,
+            palm_y - 1.0,
+            palm_x + side * (10.0 + wave * 0.10),
+            palm_y - 2.5,
+            soft_color,
+            0.65,
+        )
+
     def _draw_heart_eye(
         self,
         oled: VirtualOLED,
@@ -1917,6 +2018,8 @@ class RoboEyesFace:
                 radius_r,
                 BLACK,
             )
+
+        self._draw_wave_hand(oled, now)
 
         if s.mood_name == "dizzy":
             elapsed = now - s.dizzy_started
