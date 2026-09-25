@@ -68,6 +68,7 @@ class CameraVision:
         self.five_streak = 0
         self.right_five_streak = 0
         self.last_five_event = 0.0
+        self.last_right_five_event = 0.0
         self.five_event_pending = False
         self.right_five_event_pending = False
         self.bored_event_pending = False
@@ -269,6 +270,29 @@ class CameraVision:
             )
 
         height, width = frame.shape[:2]
+
+        # Small mirrored front-camera preview. Store RGBA bytes in the shared
+        # state so the native pixel canvas can alpha-blend it directly without
+        # depending on unsupported Termux:GUI absolute-position APIs.
+        preview_max_w = 112
+        preview_max_h = 150
+        preview_scale = min(
+            preview_max_w / float(width),
+            preview_max_h / float(height),
+            1.0,
+        )
+        preview_w = max(1, int(round(width * preview_scale)))
+        preview_h = max(1, int(round(height * preview_scale)))
+        preview = cv2.resize(
+            frame,
+            (preview_w, preview_h),
+            interpolation=cv2.INTER_AREA,
+        )
+        preview_rgba = cv2.cvtColor(
+            preview,
+            cv2.COLOR_BGR2RGBA,
+        ).tobytes()
+
         face_box = self._detect_face(frame)
         face_present = face_box is not None
 
@@ -281,8 +305,14 @@ class CameraVision:
             center_x = x + w / 2.0
             center_y = y + h / 2.0
 
-            face_x = max(-1.0, min(1.0, center_x / width * 2.0 - 1.0))
-            face_y = max(-1.0, min(1.0, center_y / height * 2.0 - 1.0))
+            face_x = max(
+                -1.0,
+                min(1.0, center_x / width * 2.0 - 1.0),
+            )
+            face_y = max(
+                -1.0,
+                min(1.0, center_y / height * 2.0 - 1.0),
+            )
             face_area = (w * h) / float(width * height)
 
             if self.face_first_seen <= 0.0:
@@ -290,6 +320,7 @@ class CameraVision:
 
             self.last_face_at = now
             self.face_history.append((now, face_x, face_y))
+
         elif now - self.last_face_at > 2.8:
             # Haar detection can miss a single low-light snapshot. Do not reset
             # the boredom timer because of one bad frame.
@@ -306,17 +337,42 @@ class CameraVision:
             with self.lock:
                 self.bored_event_pending = True
 
-        fingers, palm_confidence = self._detect_open_hand(
+        (
+            fingers,
+            palm_confidence,
+            hand_x,
+            hand_y,
+            right_hand,
+        ) = self._detect_open_hand(
             frame,
             face_box,
         )
 
-        five_fingers = fingers >= 5 and palm_confidence >= 0.48
+        five_fingers = (
+            fingers >= 5
+            and palm_confidence >= 0.48
+        )
+
+        right_hand_five = (
+            five_fingers
+            and right_hand
+        )
 
         if five_fingers:
             self.five_streak += 1
         else:
-            self.five_streak = max(0, self.five_streak - 1)
+            self.five_streak = max(
+                0,
+                self.five_streak - 1,
+            )
+
+        if right_hand_five:
+            self.right_five_streak += 1
+        else:
+            self.right_five_streak = max(
+                0,
+                self.right_five_streak - 1,
+            )
 
         if (
             self.five_streak >= 2
@@ -326,6 +382,15 @@ class CameraVision:
             self.five_streak = 0
             with self.lock:
                 self.five_event_pending = True
+
+        if (
+            self.right_five_streak >= 2
+            and now - self.last_right_five_event >= 12.0
+        ):
+            self.last_right_five_event = now
+            self.right_five_streak = 0
+            with self.lock:
+                self.right_five_event_pending = True
 
         with self.lock:
             self.state = VisionState(
@@ -337,7 +402,13 @@ class CameraVision:
                 face_area=face_area,
                 stationary_seconds=stationary_seconds,
                 five_fingers=five_fingers,
+                right_hand_five_fingers=right_hand_five,
                 open_palm_confidence=palm_confidence,
+                hand_x=hand_x,
+                hand_y=hand_y,
+                preview_rgba=preview_rgba,
+                preview_width=preview_w,
+                preview_height=preview_h,
                 last_frame_at=now,
                 error="",
             )
@@ -394,42 +465,74 @@ class CameraVision:
         self,
         frame,
         face_box,
-    ) -> tuple[int, float]:
-        """Heuristic open-palm detector used when MediaPipe is unavailable.
+    ) -> tuple[int, float, float, float, bool]:
+        """Detect an open palm and classify the user's right-hand side.
 
-        It intentionally requires a large stable contour and several convexity
-        defects. Lighting and background affect it, so the caller also requires
-        multiple consecutive detections before triggering an action.
+        The front image is mirrored before analysis. In that mirror view the
+        user's right hand normally appears on the screen-right side of their
+        face. This is a practical handedness heuristic, not biometric identity
+        recognition.
         """
 
-        image = cv2.GaussianBlur(frame, (5, 5), 0)
-        ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
+        image = cv2.GaussianBlur(
+            frame,
+            (5, 5),
+            0,
+        )
+        ycrcb = cv2.cvtColor(
+            image,
+            cv2.COLOR_BGR2YCrCb,
+        )
 
-        # Keep luminance above near-black so a dark room/background does not
-        # become one giant "skin" contour. Chrominance bounds stay deliberately
-        # broad because the phone may see different skin tones and lighting.
-        lower = np.array([24, 125, 70], dtype=np.uint8)
-        upper = np.array([255, 190, 148], dtype=np.uint8)
-        mask = cv2.inRange(ycrcb, lower, upper)
+        lower = np.array(
+            [24, 125, 70],
+            dtype=np.uint8,
+        )
+        upper = np.array(
+            [255, 190, 148],
+            dtype=np.uint8,
+        )
+        mask = cv2.inRange(
+            ycrcb,
+            lower,
+            upper,
+        )
+
+        frame_h, frame_w = mask.shape[:2]
 
         if face_box is not None:
-            x, y, w, h = face_box
-            pad = int(max(w, h) * 0.18)
+            fx, fy, fw, fh = face_box
+            pad = int(max(fw, fh) * 0.18)
+
             cv2.rectangle(
                 mask,
                 (
-                    max(0, x - pad),
-                    max(0, y - pad),
+                    max(0, fx - pad),
+                    max(0, fy - pad),
                 ),
                 (
-                    min(mask.shape[1] - 1, x + w + pad),
-                    min(mask.shape[0] - 1, y + h + pad),
+                    min(
+                        frame_w - 1,
+                        fx + fw + pad,
+                    ),
+                    min(
+                        frame_h - 1,
+                        fy + fh + pad,
+                    ),
                 ),
                 0,
                 -1,
             )
 
-        kernel = np.ones((5, 5), np.uint8)
+            face_center_x = fx + fw / 2.0
+
+        else:
+            face_center_x = frame_w / 2.0
+
+        kernel = np.ones(
+            (5, 5),
+            np.uint8,
+        )
         mask = cv2.morphologyEx(
             mask,
             cv2.MORPH_OPEN,
@@ -450,9 +553,11 @@ class CameraVision:
         )
 
         if not contours:
-            return 0, 0.0
+            return 0, 0.0, 0.0, 0.0, False
 
-        frame_area = float(mask.shape[0] * mask.shape[1])
+        frame_area = float(
+            frame_h * frame_w
+        )
 
         candidates = [
             contour
@@ -463,99 +568,222 @@ class CameraVision:
         ]
 
         if not candidates:
-            return 0, 0.0
+            return 0, 0.0, 0.0, 0.0, False
 
-        contour = max(
-            candidates,
-            key=cv2.contourArea,
-        )
+        results: list[
+            tuple[int, float, float, float, bool]
+        ] = []
 
-        contour_area = float(cv2.contourArea(contour))
-        hull_points = cv2.convexHull(contour)
-        hull_area = float(cv2.contourArea(hull_points))
+        for contour in candidates:
+            contour_area = float(
+                cv2.contourArea(contour)
+            )
+            hull_points = cv2.convexHull(
+                contour,
+            )
+            hull_area = float(
+                cv2.contourArea(hull_points)
+            )
 
-        if hull_area <= 1.0:
-            return 0, 0.0
-
-        solidity = contour_area / hull_area
-        if solidity < 0.40 or solidity > 0.94:
-            return 0, 0.0
-
-        hull_indices = cv2.convexHull(
-            contour,
-            returnPoints=False,
-        )
-
-        if hull_indices is None or len(hull_indices) < 4:
-            return 0, 0.0
-
-        defects = cv2.convexityDefects(
-            contour,
-            hull_indices,
-        )
-
-        if defects is None:
-            return 0, 0.0
-
-        x, y, w, h = cv2.boundingRect(contour)
-        depth_min = max(7.0, min(w, h) * 0.055)
-
-        valid_defects = 0
-
-        for row in defects[:, 0]:
-            start_i, end_i, far_i, depth_raw = map(int, row)
-
-            start = contour[start_i][0].astype(float)
-            end = contour[end_i][0].astype(float)
-            far = contour[far_i][0].astype(float)
-
-            a = float(np.linalg.norm(end - start))
-            b = float(np.linalg.norm(far - start))
-            c = float(np.linalg.norm(end - far))
-
-            if b <= 1e-6 or c <= 1e-6:
+            if hull_area <= 1.0:
                 continue
 
-            cosine = clamp_scalar(
-                (b * b + c * c - a * a)
-                / (2.0 * b * c),
-                -1.0,
-                1.0,
+            solidity = contour_area / hull_area
+            if (
+                solidity < 0.40
+                or solidity > 0.94
+            ):
+                continue
+
+            hull_indices = cv2.convexHull(
+                contour,
+                returnPoints=False,
             )
-            angle = math.degrees(math.acos(cosine))
-            depth = depth_raw / 256.0
 
-            if angle <= 95.0 and depth >= depth_min:
-                valid_defects += 1
+            if (
+                hull_indices is None
+                or len(hull_indices) < 4
+            ):
+                continue
 
-        fingers = max(0, min(5, valid_defects + 1))
+            defects = cv2.convexityDefects(
+                contour,
+                hull_indices,
+            )
 
-        relative_area = contour_area / frame_area
-        confidence = min(
-            1.0,
-            relative_area * 5.0
-            + valid_defects * 0.12
-            + max(0.0, 0.88 - solidity) * 0.45,
+            if defects is None:
+                continue
+
+            x, y, w, h = cv2.boundingRect(
+                contour,
+            )
+
+            center_x = x + w / 2.0
+            center_y = y + h / 2.0
+
+            depth_min = max(
+                7.0,
+                min(w, h) * 0.055,
+            )
+
+            valid_defects = 0
+
+            for row in defects[:, 0]:
+                (
+                    start_i,
+                    end_i,
+                    far_i,
+                    depth_raw,
+                ) = map(int, row)
+
+                start = contour[
+                    start_i
+                ][0].astype(float)
+                end = contour[
+                    end_i
+                ][0].astype(float)
+                far = contour[
+                    far_i
+                ][0].astype(float)
+
+                a = float(
+                    np.linalg.norm(end - start)
+                )
+                b = float(
+                    np.linalg.norm(far - start)
+                )
+                c_len = float(
+                    np.linalg.norm(end - far)
+                )
+
+                if b <= 1e-6 or c_len <= 1e-6:
+                    continue
+
+                cosine = clamp_scalar(
+                    (
+                        b * b
+                        + c_len * c_len
+                        - a * a
+                    )
+                    / (2.0 * b * c_len),
+                    -1.0,
+                    1.0,
+                )
+                angle = math.degrees(
+                    math.acos(cosine)
+                )
+                depth = depth_raw / 256.0
+
+                if (
+                    angle <= 95.0
+                    and depth >= depth_min
+                ):
+                    valid_defects += 1
+
+            fingers = max(
+                0,
+                min(
+                    5,
+                    valid_defects + 1,
+                ),
+            )
+
+            relative_area = (
+                contour_area
+                / frame_area
+            )
+            confidence = min(
+                1.0,
+                relative_area * 5.0
+                + valid_defects * 0.12
+                + max(
+                    0.0,
+                    0.88 - solidity,
+                )
+                * 0.45,
+            )
+
+            if valid_defects >= 4:
+                fingers = 5
+
+            elif (
+                valid_defects >= 3
+                and h >= w * 0.82
+                and relative_area >= 0.045
+                and solidity <= 0.88
+            ):
+                fingers = 5
+
+            hand_x = max(
+                -1.0,
+                min(
+                    1.0,
+                    center_x
+                    / frame_w
+                    * 2.0
+                    - 1.0,
+                ),
+            )
+            hand_y = max(
+                -1.0,
+                min(
+                    1.0,
+                    center_y
+                    / frame_h
+                    * 2.0
+                    - 1.0,
+                ),
+            )
+
+            # Mirrored selfie view: the user's right hand normally appears to
+            # the screen-right of the face. Allow a small overlap tolerance so
+            # a palm held close to the cheek still counts.
+            if face_box is not None:
+                right_hand = (
+                    center_x
+                    >= face_center_x
+                    - frame_w * 0.035
+                )
+            else:
+                right_hand = (
+                    center_x
+                    >= frame_w * 0.53
+                )
+
+            results.append(
+                (
+                    fingers,
+                    confidence,
+                    hand_x,
+                    hand_y,
+                    right_hand,
+                )
+            )
+
+        if not results:
+            return 0, 0.0, 0.0, 0.0, False
+
+        # If a five-finger right-hand candidate exists, prioritize it over a
+        # larger left-hand/arm contour.
+        right_five = [
+            result
+            for result in results
+            if (
+                result[0] >= 5
+                and result[4]
+            )
+        ]
+
+        if right_five:
+            return max(
+                right_five,
+                key=lambda result: result[1],
+            )
+
+        return max(
+            results,
+            key=lambda result: result[1],
         )
-
-        # Four valleys usually means five extended fingers. A clean four-finger
-        # valley pattern is promoted to five rather than requiring a fragile
-        # fifth contour tip.
-        if valid_defects >= 4:
-            fingers = 5
-        elif (
-            valid_defects >= 3
-            and h >= w * 0.82
-            and relative_area >= 0.045
-            and solidity <= 0.88
-        ):
-            # Phone snapshots often merge two neighboring fingertips after
-            # blur/morphology, leaving only three visible valleys. In that
-            # specific open-palm geometry, treat it as five fingers, but only
-            # after the multi-frame stability gate in _analyze().
-            fingers = 5
-
-        return fingers, confidence
 
 
 def clamp_scalar(
