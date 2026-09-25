@@ -26,6 +26,7 @@ echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/camera_vision.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/doodle_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/oled_asset_show.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/vision_test.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
 echo "Installing Termux:GUI Python binding..."
@@ -71,6 +72,12 @@ echo "  desk-buddy"
 echo
 echo "Old terminal fallback:"
 echo "  desk-buddy --terminal"
+echo
+echo "Camera gesture diagnostic:"
+echo "  desk-buddy --vision-test"
+echo
+echo "Direct OLED playback diagnostic:"
+echo "  desk-buddy --test-oled"
 echo
 echo "IMPORTANT:"
 echo "Native graphics require the Termux:GUI Android plugin app."
