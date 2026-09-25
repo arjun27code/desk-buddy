@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import curses
 import json
+import math
 import random
 import shutil
 import subprocess
@@ -16,67 +17,93 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-APP_NAME = "Desk Buddy"
+APP_NAME = "DESK BUDDY"
 CONFIG_DIR = Path.home() / ".config" / "desk-buddy"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 WEATHER_CODES = {
-    0: ("Clear", "sunny"),
-    1: ("Mostly clear", "sunny"),
-    2: ("Partly cloudy", "cloudy"),
-    3: ("Cloudy", "cloudy"),
-    45: ("Foggy", "foggy"),
-    48: ("Foggy", "foggy"),
-    51: ("Light drizzle", "rainy"),
-    53: ("Drizzle", "rainy"),
-    55: ("Heavy drizzle", "rainy"),
-    61: ("Light rain", "rainy"),
-    63: ("Rain", "rainy"),
-    65: ("Heavy rain", "rainy"),
-    71: ("Light snow", "snowy"),
-    73: ("Snow", "snowy"),
-    75: ("Heavy snow", "snowy"),
-    80: ("Rain showers", "rainy"),
-    81: ("Rain showers", "rainy"),
-    82: ("Heavy showers", "stormy"),
-    95: ("Thunderstorm", "stormy"),
-    96: ("Storm with hail", "stormy"),
-    99: ("Storm with hail", "stormy"),
+    0: ("Clear", "happy"),
+    1: ("Mostly clear", "happy"),
+    2: ("Partly cloudy", "idle"),
+    3: ("Cloudy", "idle"),
+    45: ("Foggy", "sleepy"),
+    48: ("Foggy", "sleepy"),
+    51: ("Light drizzle", "sad"),
+    53: ("Drizzle", "sad"),
+    55: ("Heavy drizzle", "sad"),
+    61: ("Light rain", "sad"),
+    63: ("Rain", "sad"),
+    65: ("Heavy rain", "sad"),
+    71: ("Light snow", "surprised"),
+    73: ("Snow", "surprised"),
+    75: ("Heavy snow", "surprised"),
+    80: ("Rain showers", "sad"),
+    81: ("Rain showers", "sad"),
+    82: ("Heavy showers", "surprised"),
+    95: ("Thunderstorm", "surprised"),
+    96: ("Storm with hail", "surprised"),
+    99: ("Storm with hail", "surprised"),
 }
 
 MESSAGES = {
     "idle": [
+        "watching the desk",
+        "tiny brain online",
+        "everything looks suspiciously normal",
         "desk duty active",
-        "watching absolutely everything",
-        "tiny brain, serious responsibilities",
-        "all systems suspiciously calm",
     ],
     "happy": [
         "boop received",
-        "energy level: excellent",
-        "acceptable human interaction",
         "morale upgraded",
+        "acceptable human interaction",
+        "happy protocol enabled",
+    ],
+    "love": [
+        "friend detected",
+        "affection packet received",
+        "you may boop again",
+    ],
+    "excited": [
+        "energy spike",
+        "maximum tiny robot enthusiasm",
+        "attention acquired",
     ],
     "sleepy": [
         "low-power cuteness mode",
-        "pretending not to fall asleep",
-        "night shift is rude",
+        "trying very hard to stay awake",
+        "nap calculations in progress",
     ],
     "surprised": [
         "unexpected event detected",
         "that was not in the handbook",
-        "attention acquired",
+        "wide-eye protocol",
     ],
     "focused": [
         "focus mode",
         "processing desk mysteries",
-        "concentration face activated",
+        "serious robot business",
     ],
-    "rainy": [
-        "rain outside. staying put.",
-        "weather says: indoor creature",
+    "sad": [
+        "rain mood",
+        "small weather disappointment",
+        "clouds have opinions",
+    ],
+    "suspicious": [
+        "hmm",
+        "investigating",
+        "something is mildly questionable",
     ],
 }
+
+EYE_COLOR_NAMES = ["cyan", "magenta", "yellow", "green", "blue", "white"]
+EYE_CURSES_COLORS = [
+    curses.COLOR_CYAN,
+    curses.COLOR_MAGENTA,
+    curses.COLOR_YELLOW,
+    curses.COLOR_GREEN,
+    curses.COLOR_BLUE,
+    curses.COLOR_WHITE,
+]
 
 
 @dataclass
@@ -102,13 +129,25 @@ class WeatherInfo:
 class State:
     mood: str = "idle"
     message: str = "waking up"
-    gaze_x: int = 0
-    gaze_y: int = 0
-    blink_until: float = 0.0
     mood_until: float = 0.0
-    next_blink: float = 0.0
+
+    gaze_x: float = 0.0
+    gaze_y: float = 0.0
+    target_gaze_x: float = 0.0
+    target_gaze_y: float = 0.0
     next_gaze: float = 0.0
+
+    blinking: bool = False
+    blink_started: float = 0.0
+    blink_duration: float = 0.22
+    next_blink: float = 0.0
+    pending_double_blink: bool = False
+
+    eye_color_index: int = 0
+
     next_message: float = 0.0
+    hint_until: float = 0.0
+
     battery: BatteryInfo = field(default_factory=BatteryInfo)
     weather: WeatherInfo = field(default_factory=WeatherInfo)
     last_battery_check: float = 0.0
@@ -158,16 +197,13 @@ def get_battery() -> BatteryInfo:
     if not payload:
         return BatteryInfo()
 
-    percentage = payload.get("percentage")
-    temperature = payload.get("temperature")
-
     try:
-        percentage = int(percentage) if percentage is not None else None
+        percentage = int(payload.get("percentage"))
     except (TypeError, ValueError):
         percentage = None
 
     try:
-        temperature = float(temperature) if temperature is not None else None
+        temperature = float(payload.get("temperature"))
     except (TypeError, ValueError):
         temperature = None
 
@@ -207,7 +243,7 @@ def geocode_city(city: str) -> tuple[float, float, str] | None:
         }
     )
     url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
-    request = Request(url, headers={"User-Agent": "desk-buddy/1.0"})
+    request = Request(url, headers={"User-Agent": "desk-buddy/2.0"})
 
     try:
         with urlopen(request, timeout=8) as response:
@@ -220,7 +256,6 @@ def geocode_city(city: str) -> tuple[float, float, str] | None:
         return None
 
     first = results[0]
-
     try:
         lat = float(first["latitude"])
         lon = float(first["longitude"])
@@ -228,28 +263,22 @@ def geocode_city(city: str) -> tuple[float, float, str] | None:
         return None
 
     label_parts = [str(first.get("name", city))]
-    admin = first.get("admin1")
-    country = first.get("country")
-
-    if admin:
-        label_parts.append(str(admin))
-    elif country:
-        label_parts.append(str(country))
+    if first.get("admin1"):
+        label_parts.append(str(first["admin1"]))
+    elif first.get("country"):
+        label_parts.append(str(first["country"]))
 
     return lat, lon, ", ".join(label_parts)
 
 
 def fetch_weather(city: str | None) -> WeatherInfo:
     position = get_termux_location()
-
     if position is None and city:
         position = geocode_city(city)
-
     if position is None:
         return WeatherInfo()
 
     lat, lon, label = position
-
     params = urlencode(
         {
             "latitude": f"{lat:.5f}",
@@ -259,7 +288,7 @@ def fetch_weather(city: str | None) -> WeatherInfo:
         }
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
-    request = Request(url, headers={"User-Agent": "desk-buddy/1.0"})
+    request = Request(url, headers={"User-Agent": "desk-buddy/2.0"})
 
     try:
         with urlopen(request, timeout=8) as response:
@@ -274,10 +303,8 @@ def fetch_weather(city: str | None) -> WeatherInfo:
     except (KeyError, TypeError, ValueError):
         return WeatherInfo()
 
-    apparent_raw = current.get("apparent_temperature")
-
     try:
-        apparent = float(apparent_raw) if apparent_raw is not None else None
+        apparent = float(current.get("apparent_temperature"))
     except (TypeError, ValueError):
         apparent = None
 
@@ -287,7 +314,6 @@ def fetch_weather(city: str | None) -> WeatherInfo:
         code = -1
 
     description, mood = WEATHER_CODES.get(code, ("Weather", "idle"))
-
     return WeatherInfo(
         available=True,
         temperature=temp,
@@ -307,7 +333,6 @@ def put_text(
     max_width: int | None = None,
 ) -> None:
     height, width = screen.getmaxyx()
-
     if y < 0 or y >= height or x >= width:
         return
 
@@ -316,10 +341,8 @@ def put_text(
         x = 0
 
     allowed = width - x - 1
-
     if max_width is not None:
         allowed = min(allowed, max_width)
-
     if allowed <= 0:
         return
 
@@ -331,202 +354,368 @@ def put_text(
 
 def centered(screen: curses.window, y: int, text: str, attr: int = 0) -> None:
     _, width = screen.getmaxyx()
-    x = max(0, (width - len(text)) // 2)
-    put_text(screen, y, x, text, attr)
+    put_text(screen, y, max(0, (width - len(text)) // 2), text, attr)
 
 
-def draw_small_face(screen: curses.window, state: State, colors: dict[str, int]) -> None:
-    height, _ = screen.getmaxyx()
-    eye = "▰" if time.monotonic() >= state.blink_until else "━"
-
-    if state.mood == "sleepy":
-        eye = "━"
-    elif state.mood == "surprised":
-        eye = "●"
-
-    centered(
-        screen,
-        max(1, height // 2 - 1),
-        f"{eye}   {eye}",
-        colors["eye"] | curses.A_BOLD,
-    )
-
-    mouth = "⌣" if state.mood == "happy" else "·"
-    centered(
-        screen,
-        max(2, height // 2 + 1),
-        mouth,
-        colors["accent"] | curses.A_BOLD,
-    )
+def fill_cells(
+    screen: curses.window,
+    y: int,
+    x: int,
+    width: int,
+    attr: int,
+    char: str = " ",
+) -> None:
+    if width <= 0:
+        return
+    put_text(screen, y, x, char * width, attr, width)
 
 
-def eye_rows(state: State, blink: bool) -> list[str]:
-    if blink or state.mood == "sleepy":
-        return [
-            "           ",
-            "           ",
-            "  ━━━━━━━  ",
-            "           ",
-            "           ",
-        ]
-
-    if state.mood == "surprised":
-        return [
-            "   ╭───╮   ",
-            "  ╭╯   ╰╮  ",
-            "  │  ●  │  ",
-            "  ╰╮   ╭╯  ",
-            "   ╰───╯   ",
-        ]
-
-    if state.mood == "happy":
-        return [
-            "           ",
-            " ╲       ╱ ",
-            "  ╲     ╱  ",
-            "   ╲___╱   ",
-            "           ",
-        ]
-
-    brow = "  ╲─────╱  " if state.mood == "focused" else "           "
-
-    pupil_x = max(2, min(8, 5 + state.gaze_x))
-    pupil_y = max(1, min(3, 2 + state.gaze_y))
-
-    rows = [
-        list(brow),
-        list(" │       │ "),
-        list(" │       │ "),
-        list(" │       │ "),
-        list(" ╰───────╯ "),
-    ]
-
-    if state.mood != "focused":
-        rows[0] = list(" ╭───────╮ ")
-
-    rows[pupil_y][pupil_x] = "●"
-
-    return ["".join(row) for row in rows]
+def rounded_row_inset(row: int, height: int) -> int:
+    if height <= 2:
+        return 0
+    edge = min(row, height - 1 - row)
+    if edge == 0:
+        return 2
+    if edge == 1:
+        return 1
+    return 0
 
 
-def draw_face(screen: curses.window, state: State, colors: dict[str, int]) -> None:
-    height, width = screen.getmaxyx()
-
-    if height < 16 or width < 38:
-        draw_small_face(screen, state, colors)
+def draw_rounded_eye_block(
+    screen: curses.window,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    eye_attr: int,
+    pupil_attr: int,
+    highlight_attr: int,
+    gaze_x: float,
+    gaze_y: float,
+    pupil_scale: float = 1.0,
+    top_mask: str | None = None,
+    bottom_mask: bool = False,
+) -> None:
+    if width < 5 or height < 2:
         return
 
-    blink = time.monotonic() < state.blink_until
-    left_rows = eye_rows(state, blink)
-    right_rows = eye_rows(state, blink)
+    for row in range(height):
+        inset = rounded_row_inset(row, height)
+        if top_mask == "left_down":
+            inset_left = max(inset, max(0, 3 - row))
+            inset_right = inset
+        elif top_mask == "right_down":
+            inset_left = inset
+            inset_right = max(inset, max(0, 3 - row))
+        else:
+            inset_left = inset
+            inset_right = inset
 
-    gap = 7
-    eye_width = max(len(row) for row in left_rows)
-    total_width = eye_width * 2 + gap
-    start_x = max(0, (width - total_width) // 2)
-    start_y = max(2, height // 2 - 5)
+        row_width = width - inset_left - inset_right
+        if row_width > 0:
+            fill_cells(screen, y + row, x + inset_left, row_width, eye_attr)
 
-    for index, row in enumerate(left_rows):
-        put_text(
-            screen,
-            start_y + index,
-            start_x,
-            row,
-            colors["eye"] | curses.A_BOLD,
-        )
+    if bottom_mask and height >= 4:
+        mask_rows = max(1, height // 3)
+        for row in range(mask_rows):
+            inset = row + 1
+            w = max(0, width - inset * 2)
+            fill_cells(
+                screen,
+                y + height - 1 - row,
+                x + inset,
+                w,
+                curses.A_NORMAL,
+            )
 
-    for index, row in enumerate(right_rows):
-        put_text(
-            screen,
-            start_y + index,
-            start_x + eye_width + gap,
-            row,
-            colors["eye"] | curses.A_BOLD,
-        )
+    pupil_w = max(3, int(width * 0.30 * pupil_scale))
+    pupil_h = max(2, int(height * 0.38 * pupil_scale))
+    pupil_w = min(pupil_w, max(2, width - 6))
+    pupil_h = min(pupil_h, max(1, height - 3))
 
-    mouth_y = start_y + 7
+    max_dx = max(0, (width - pupil_w) // 2 - 2)
+    max_dy = max(0, (height - pupil_h) // 2 - 1)
 
-    if state.mood == "happy":
-        mouth = "╰─────╯"
-    elif state.mood == "surprised":
-        mouth = "  ○  "
-    elif state.mood == "sleepy":
-        mouth = "  ~  "
-    elif state.mood == "focused":
-        mouth = " ─── "
-    else:
-        mouth = "╰───╯"
+    pupil_x = x + (width - pupil_w) // 2 + int(round(gaze_x * max_dx))
+    pupil_y = y + (height - pupil_h) // 2 + int(round(gaze_y * max_dy))
 
-    centered(
-        screen,
-        mouth_y,
-        mouth,
-        colors["accent"] | curses.A_BOLD,
-    )
+    for row in range(pupil_h):
+        fill_cells(screen, pupil_y + row, pupil_x, pupil_w, pupil_attr)
+
+    if pupil_w >= 3 and pupil_h >= 2:
+        highlight_x = pupil_x + pupil_w - 1
+        highlight_y = pupil_y
+        fill_cells(screen, highlight_y, highlight_x, 1, highlight_attr)
 
 
-def draw_status(screen: curses.window, state: State, colors: dict[str, int]) -> None:
+def draw_heart_eye(
+    screen: curses.window,
+    center_x: int,
+    center_y: int,
+    size: int,
+    heart_attr: int,
+) -> None:
+    width = max(9, size)
+    height = max(5, size // 2)
+    pattern = [
+        "  ██   ██  ",
+        " ████ ████ ",
+        " █████████ ",
+        "  ███████  ",
+        "   █████   ",
+        "    ███    ",
+        "     █     ",
+    ]
+
+    scale_w = max(1, width // 11)
+    scale_h = max(1, height // 7)
+    rendered_h = len(pattern) * scale_h
+    start_y = center_y - rendered_h // 2
+
+    for py, row in enumerate(pattern):
+        expanded = "".join((" " * scale_w if ch == " " else "█" * scale_w) for ch in row)
+        start_x = center_x - len(expanded) // 2
+        for sy in range(scale_h):
+            put_text(screen, start_y + py * scale_h + sy, start_x, expanded, heart_attr)
+
+
+def blink_open_ratio(state: State, now: float) -> float:
+    if not state.blinking:
+        return 1.0
+
+    progress = (now - state.blink_started) / max(0.05, state.blink_duration)
+    if progress >= 1.0:
+        state.blinking = False
+        if state.pending_double_blink:
+            state.pending_double_blink = False
+            state.next_blink = now + 0.16
+        return 1.0
+
+    if progress < 0.5:
+        return max(0.08, 1.0 - progress * 2.0)
+    return max(0.08, (progress - 0.5) * 2.0)
+
+
+def trigger_blink(state: State, now: float) -> None:
+    state.blinking = True
+    state.blink_started = now
+    state.blink_duration = random.uniform(0.18, 0.24)
+    state.pending_double_blink = random.random() < 0.12
+    state.next_blink = now + random.uniform(2.0, 6.0)
+
+
+def update_motion(state: State, now: float) -> None:
+    if not state.blinking and now >= state.next_blink:
+        trigger_blink(state, now)
+
+    if now >= state.next_gaze and not state.blinking:
+        choices = [
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (-0.7, 0.0),
+            (0.7, 0.0),
+            (-0.55, -0.45),
+            (0.55, -0.45),
+            (-0.45, 0.45),
+            (0.45, 0.45),
+        ]
+        state.target_gaze_x, state.target_gaze_y = random.choice(choices)
+        state.next_gaze = now + random.uniform(0.55, 2.8)
+
+    ease = 0.22
+    state.gaze_x += (state.target_gaze_x - state.gaze_x) * ease
+    state.gaze_y += (state.target_gaze_y - state.gaze_y) * ease
+
+
+def eye_geometry(
+    screen: curses.window,
+    state: State,
+    now: float,
+) -> tuple[int, int, int, int, int]:
     height, width = screen.getmaxyx()
-    now = datetime.now()
-    clock = now.strftime("%H:%M")
-    date = now.strftime("%a %d %b")
 
-    put_text(
-        screen,
-        1,
-        2,
-        f" {APP_NAME.upper()} ",
-        colors["muted"] | curses.A_BOLD,
-    )
+    available_w = max(28, min(width - 4, 68))
+    gap = max(3, min(7, available_w // 10))
+    eye_w = max(11, min(22, (available_w - gap) // 2))
 
-    right = f"{clock}  {date}"
-    put_text(
-        screen,
-        1,
-        max(2, width - len(right) - 3),
-        right,
-        colors["text"],
-    )
+    base_h = max(6, min(12, int(round(eye_w * 0.52))))
+    breath = math.sin(now / 0.78) * 0.5
+    base_h = max(4, base_h + int(round(breath)))
 
-    status_parts: list[str] = []
+    if state.mood == "surprised":
+        eye_w = max(10, eye_w - 3)
+        base_h = min(13, base_h + 3)
+    elif state.mood == "sleepy":
+        base_h = max(3, base_h - 3)
+        eye_w = min(24, eye_w + 1)
+    elif state.mood == "excited":
+        eye_w = min(24, eye_w + 2)
+        base_h = min(13, base_h + 2)
+    elif state.mood == "suspicious":
+        base_h = max(4, base_h - 2)
 
-    if state.battery.available and state.battery.percentage is not None:
-        battery = f"BAT {state.battery.percentage}%"
+    open_ratio = blink_open_ratio(state, now)
+    draw_h = max(1, int(round(base_h * open_ratio)))
 
-        if state.battery.status:
-            battery += f" {state.battery.status.lower()}"
+    total_w = eye_w * 2 + gap
+    start_x = max(1, (width - total_w) // 2)
 
-        status_parts.append(battery)
-    else:
-        status_parts.append("BAT install Termux:API")
+    face_center_y = height // 2 - 2
+    start_y = max(4, face_center_y - draw_h // 2)
 
-    if state.weather.available and state.weather.temperature is not None:
-        status_parts.append(
-            f"{state.weather.description} {round(state.weather.temperature)}°C"
+    return start_x, start_y, eye_w, draw_h, gap
+
+
+def draw_face(
+    screen: curses.window,
+    state: State,
+    colors: dict[str, Any],
+    now: float,
+) -> None:
+    height, width = screen.getmaxyx()
+
+    if height < 12 or width < 30:
+        centered(screen, height // 2, "●   ●", colors["text"])
+        return
+
+    start_x, start_y, eye_w, eye_h, gap = eye_geometry(screen, state, now)
+    right_x = start_x + eye_w + gap
+
+    eye_attr = colors["eye_fills"][state.eye_color_index]
+    pupil_attr = colors["pupil"]
+    highlight_attr = colors["highlight"]
+
+    if state.mood == "love":
+        left_center = start_x + eye_w // 2
+        right_center = right_x + eye_w // 2
+        center_y = start_y + max(3, eye_h // 2)
+        heart_attr = colors["love_fill"]
+        draw_heart_eye(screen, left_center, center_y, eye_w, heart_attr)
+        draw_heart_eye(screen, right_center, center_y, eye_w, heart_attr)
+        return
+
+    top_mask_left = None
+    top_mask_right = None
+    bottom_mask = state.mood == "happy"
+
+    if state.mood == "focused":
+        top_mask_left = "left_down"
+        top_mask_right = "right_down"
+    elif state.mood == "sad":
+        top_mask_left = "right_down"
+        top_mask_right = "left_down"
+
+    if state.mood == "suspicious":
+        left_h = max(2, eye_h // 2)
+        right_h = eye_h
+        draw_rounded_eye_block(
+            screen,
+            start_x,
+            start_y + (eye_h - left_h) // 2,
+            eye_w,
+            left_h,
+            eye_attr,
+            pupil_attr,
+            highlight_attr,
+            state.gaze_x,
+            state.gaze_y,
+            pupil_scale=0.9,
         )
-    else:
-        status_parts.append("WEATHER press W")
+        draw_rounded_eye_block(
+            screen,
+            right_x,
+            start_y,
+            eye_w,
+            right_h,
+            eye_attr,
+            pupil_attr,
+            highlight_attr,
+            state.gaze_x,
+            state.gaze_y,
+            pupil_scale=0.9,
+        )
+        return
 
-    bottom_y = max(0, height - 4)
+    pupil_scale = 0.82 if state.mood == "surprised" else 1.0
 
-    centered(
+    draw_rounded_eye_block(
         screen,
-        bottom_y,
-        "  •  ".join(status_parts),
-        colors["muted"],
+        start_x,
+        start_y,
+        eye_w,
+        eye_h,
+        eye_attr,
+        pupil_attr,
+        highlight_attr,
+        state.gaze_x,
+        state.gaze_y,
+        pupil_scale=pupil_scale,
+        top_mask=top_mask_left,
+        bottom_mask=bottom_mask,
     )
-    centered(
+    draw_rounded_eye_block(
         screen,
-        bottom_y + 1,
-        state.message,
+        right_x,
+        start_y,
+        eye_w,
+        eye_h,
+        eye_attr,
+        pupil_attr,
+        highlight_attr,
+        state.gaze_x,
+        state.gaze_y,
+        pupil_scale=pupil_scale,
+        top_mask=top_mask_right,
+        bottom_mask=bottom_mask,
+    )
+
+
+def draw_ui(
+    screen: curses.window,
+    state: State,
+    colors: dict[str, Any],
+    now: float,
+) -> None:
+    height, width = screen.getmaxyx()
+    current = datetime.now()
+
+    put_text(screen, 1, 2, APP_NAME, colors["label"] | curses.A_BOLD)
+
+    time_text = current.strftime("%H:%M")
+    put_text(
+        screen,
+        1,
+        max(2, width - len(time_text) - 3),
+        time_text,
         colors["text"] | curses.A_BOLD,
     )
-    centered(
-        screen,
-        bottom_y + 2,
-        "SPACE react   B boop   W weather   S sleep   Q quit",
-        colors["muted"],
-    )
+
+    if height < 18:
+        return
+
+    status_bits: list[str] = []
+
+    if state.battery.available and state.battery.percentage is not None:
+        status_bits.append(f"BAT {state.battery.percentage}%")
+
+    if state.weather.available and state.weather.temperature is not None:
+        status_bits.append(
+            f"{state.weather.description.upper()} {round(state.weather.temperature)}°C"
+        )
+
+    if status_bits:
+        centered(screen, height - 4, "  •  ".join(status_bits), colors["label"])
+
+    centered(screen, height - 3, state.message, colors["text"])
+
+    if now <= state.hint_until:
+        centered(
+            screen,
+            height - 2,
+            "B boop  SPACE mood  W weather  S sleep  C color  H help  Q quit",
+            colors["muted"],
+        )
 
 
 def set_mood(
@@ -537,11 +726,7 @@ def set_mood(
 ) -> None:
     state.mood = mood
     state.mood_until = time.monotonic() + duration
-
-    if message is not None:
-        state.message = message
-    else:
-        state.message = random.choice(MESSAGES.get(mood, MESSAGES["idle"]))
+    state.message = message or random.choice(MESSAGES.get(mood, MESSAGES["idle"]))
 
 
 def refresh_battery(state: State) -> None:
@@ -555,19 +740,9 @@ def refresh_battery(state: State) -> None:
     status = state.battery.status.lower()
 
     if "charging" in status:
-        set_mood(
-            state,
-            "happy",
-            4.0,
-            "charging. excellent life choices.",
-        )
+        set_mood(state, "happy", 3.0, "charging")
     elif percent is not None and percent <= 15:
-        set_mood(
-            state,
-            "focused",
-            4.0,
-            "battery low. charger requested.",
-        )
+        set_mood(state, "focused", 4.0, "battery low")
 
 
 def refresh_weather(
@@ -578,51 +753,36 @@ def refresh_weather(
     state.weather = fetch_weather(city)
     state.last_weather_check = time.monotonic()
 
-    if state.weather.available:
-        temp = state.weather.temperature or 0
-
-        if state.weather.mood == "rainy":
+    if not state.weather.available:
+        if manual:
             set_mood(
                 state,
                 "focused",
                 4.0,
-                random.choice(MESSAGES["rainy"]),
+                "weather needs Termux:API location or a saved city",
             )
-        elif state.weather.mood == "stormy":
-            set_mood(
-                state,
-                "surprised",
-                4.0,
-                "storm outside. staying alert.",
-            )
-        elif temp >= 34:
-            set_mood(
-                state,
-                "sleepy",
-                4.0,
-                "too hot. efficiency has been cancelled.",
-            )
-        elif manual:
-            set_mood(
-                state,
-                "happy",
-                3.0,
-                f"{state.weather.description.lower()}, {round(temp)} degrees",
-            )
-    elif manual:
+        return
+
+    temp = state.weather.temperature or 0.0
+    if manual:
         set_mood(
             state,
-            "focused",
+            state.weather.mood,
             4.0,
-            "weather needs Termux:API location or a configured city",
+            f"{state.weather.description.lower()}  {round(temp)}°C",
         )
+    elif state.weather.mood in {"sad", "surprised"}:
+        set_mood(state, state.weather.mood, 4.0)
 
 
-def init_colors() -> dict[str, int]:
-    colors = {
-        "eye": curses.A_BOLD,
-        "accent": curses.A_BOLD,
+def init_colors() -> dict[str, Any]:
+    colors: dict[str, Any] = {
+        "eye_fills": [curses.A_REVERSE] * len(EYE_COLOR_NAMES),
+        "pupil": curses.A_NORMAL,
+        "highlight": curses.A_REVERSE | curses.A_BOLD,
+        "love_fill": curses.A_BOLD,
         "text": curses.A_NORMAL,
+        "label": curses.A_BOLD,
         "muted": curses.A_DIM,
     }
 
@@ -630,29 +790,48 @@ def init_colors() -> dict[str, int]:
         return colors
 
     curses.start_color()
-
     try:
         curses.use_default_colors()
     except curses.error:
         pass
 
-    try:
-        curses.init_pair(1, curses.COLOR_CYAN, -1)
-        curses.init_pair(2, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(3, curses.COLOR_WHITE, -1)
-        curses.init_pair(4, curses.COLOR_BLUE, -1)
+    eye_fills: list[int] = []
+    pair = 1
 
-        colors["eye"] = curses.color_pair(1) | curses.A_BOLD
-        colors["accent"] = curses.color_pair(2) | curses.A_BOLD
-        colors["text"] = curses.color_pair(3)
-        colors["muted"] = curses.color_pair(4) | curses.A_BOLD
+    try:
+        for color in EYE_CURSES_COLORS:
+            curses.init_pair(pair, color, color)
+            eye_fills.append(curses.color_pair(pair))
+            pair += 1
+
+        curses.init_pair(pair, curses.COLOR_BLACK, curses.COLOR_BLACK)
+        colors["pupil"] = curses.color_pair(pair)
+        pair += 1
+
+        curses.init_pair(pair, curses.COLOR_WHITE, curses.COLOR_WHITE)
+        colors["highlight"] = curses.color_pair(pair) | curses.A_BOLD
+        pair += 1
+
+        curses.init_pair(pair, curses.COLOR_MAGENTA, curses.COLOR_MAGENTA)
+        colors["love_fill"] = curses.color_pair(pair)
+        pair += 1
+
+        curses.init_pair(pair, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        colors["text"] = curses.color_pair(pair)
+        colors["label"] = curses.color_pair(pair) | curses.A_BOLD
+        pair += 1
+
+        curses.init_pair(pair, curses.COLOR_BLUE, curses.COLOR_BLACK)
+        colors["muted"] = curses.color_pair(pair) | curses.A_BOLD
+
+        colors["eye_fills"] = eye_fills
     except curses.error:
         pass
 
     return colors
 
 
-def main_loop(screen: curses.window, city: str | None) -> None:
+def main_loop(screen: curses.window, city: str | None, config: dict[str, Any]) -> None:
     try:
         curses.curs_set(0)
     except curses.error:
@@ -660,60 +839,54 @@ def main_loop(screen: curses.window, city: str | None) -> None:
 
     screen.nodelay(True)
     screen.keypad(True)
-    screen.timeout(50)
+    screen.timeout(33)
 
     colors = init_colors()
+    now = time.monotonic()
+
+    color_index = int(config.get("eye_color_index", 0))
+    color_index %= len(EYE_COLOR_NAMES)
 
     state = State(
-        next_blink=time.monotonic() + random.uniform(1.5, 4.0),
-        next_gaze=time.monotonic() + random.uniform(0.7, 2.0),
-        next_message=time.monotonic() + random.uniform(8.0, 15.0),
+        eye_color_index=color_index,
+        next_blink=now + random.uniform(1.3, 3.5),
+        next_gaze=now + random.uniform(0.4, 1.2),
+        next_message=now + random.uniform(7.0, 12.0),
+        hint_until=now + 8.0,
     )
 
     refresh_battery(state)
     refresh_weather(state, city)
 
     while True:
-        now_mono = time.monotonic()
-        now_hour = datetime.now().hour
+        now = time.monotonic()
+        hour = datetime.now().hour
 
-        if now_mono >= state.next_blink:
-            state.blink_until = now_mono + random.uniform(0.10, 0.18)
-            state.next_blink = now_mono + random.uniform(2.0, 5.5)
+        update_motion(state, now)
 
-        if now_mono >= state.next_gaze:
-            state.gaze_x = random.choice([-2, -1, 0, 0, 0, 1, 2])
-            state.gaze_y = random.choice([-1, 0, 0, 0, 1])
-            state.next_gaze = now_mono + random.uniform(1.0, 3.2)
-
-        if state.mood != "idle" and now_mono >= state.mood_until:
+        if state.mood != "idle" and now >= state.mood_until:
             state.mood = "idle"
 
-        if state.mood == "idle" and (now_hour >= 23 or now_hour < 7):
+        if state.mood == "idle" and (hour >= 23 or hour < 7):
             state.mood = "sleepy"
 
-        if now_mono >= state.next_message and state.mood in {"idle", "sleepy"}:
-            pool = (
-                MESSAGES["sleepy"]
-                if state.mood == "sleepy"
-                else MESSAGES["idle"]
-            )
+        if now >= state.next_message and state.mood in {"idle", "sleepy"}:
+            pool = MESSAGES["sleepy"] if state.mood == "sleepy" else MESSAGES["idle"]
             state.message = random.choice(pool)
-            state.next_message = now_mono + random.uniform(10.0, 18.0)
+            state.next_message = now + random.uniform(9.0, 16.0)
 
-        if now_mono - state.last_battery_check >= 30:
+        if now - state.last_battery_check >= 30.0:
             refresh_battery(state)
 
-        if now_mono - state.last_weather_check >= 600:
+        if now - state.last_weather_check >= 600.0:
             refresh_weather(state, city)
 
         screen.erase()
-        draw_face(screen, state, colors)
-        draw_status(screen, state, colors)
+        draw_face(screen, state, colors, now)
+        draw_ui(screen, state, colors, now)
         screen.refresh()
 
         key = screen.getch()
-
         if key == -1:
             continue
 
@@ -723,32 +896,42 @@ def main_loop(screen: curses.window, city: str | None) -> None:
         if key in (ord("b"), ord("B")):
             set_mood(
                 state,
-                "happy",
-                3.2,
-                random.choice(MESSAGES["happy"]),
+                random.choice(["happy", "love", "excited"]),
+                3.3,
             )
-        elif key in (ord("w"), ord("W")):
-            state.message = "checking weather..."
-            screen.refresh()
-            refresh_weather(state, city, manual=True)
-        elif key in (ord("s"), ord("S")):
-            set_mood(
-                state,
-                "sleepy",
-                8.0,
-                random.choice(MESSAGES["sleepy"]),
-            )
+            state.hint_until = max(state.hint_until, now + 2.0)
         elif key == ord(" "):
             set_mood(
                 state,
-                random.choice(["happy", "surprised", "focused"]),
-                3.0,
+                random.choice(
+                    ["happy", "love", "excited", "surprised", "focused", "suspicious"]
+                ),
+                3.2,
             )
+        elif key in (ord("s"), ord("S")):
+            set_mood(state, "sleepy", 8.0)
+        elif key in (ord("w"), ord("W")):
+            state.message = "checking weather"
+            screen.refresh()
+            refresh_weather(state, city, manual=True)
+        elif key in (ord("c"), ord("C")):
+            state.eye_color_index = (state.eye_color_index + 1) % len(EYE_COLOR_NAMES)
+            config["eye_color_index"] = state.eye_color_index
+            save_config(config)
+            set_mood(
+                state,
+                "happy",
+                2.0,
+                f"eyes: {EYE_COLOR_NAMES[state.eye_color_index]}",
+            )
+        elif key in (ord("h"), ord("H")):
+            state.hint_until = now + 8.0
+            state.message = "controls visible"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Full-screen Desk Buddy for Termux."
+        description="OLED-style animated Desk Buddy for Termux."
     )
     parser.add_argument(
         "--city",
@@ -774,7 +957,7 @@ def main() -> None:
     city = args.city or config.get("city")
 
     try:
-        curses.wrapper(main_loop, city)
+        curses.wrapper(main_loop, city, config)
     except KeyboardInterrupt:
         pass
     finally:
