@@ -431,3 +431,21 @@ Run:
 This starts the local OLED frame file immediately. If the animation plays in this mode but not from the hand gesture, the frame loader is healthy and only vision calibration needs attention.
 
 The terminal also prints the detected right-hand confidence and the OLED file/frame count when a gesture fires.
+
+
+### Isolate camera gesture detection
+
+Run:
+
+    desk-buddy --vision-test
+
+For about 18 seconds it prints one line per fresh camera snapshot with:
+
+- face detected
+- estimated finger count
+- right-hand candidate flag
+- confirmed RH5 flag
+- open-palm confidence
+- horizontal hand position
+
+It exits early with PASS when the exact right-hand open-palm event fires.
