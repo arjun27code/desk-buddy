@@ -23,35 +23,17 @@ echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gui_buddy.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/buddy_advanced.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gibber_voice.py"
-"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/camera_vision.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/game_hub.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/doodle_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/oled_asset_show.py"
-"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/vision_test.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
 echo "Installing Termux:GUI Python binding..."
 "$PYTHON_BIN" -m pip install --upgrade termuxgui
 
 if ! command -v termux-sensor >/dev/null 2>&1; then
-  echo "Installing Termux:API command package for sensors, camera and audio..."
+  echo "Installing Termux:API command package for motion sensors and audio..."
   pkg install termux-api -y
-fi
-
-if ! "$PYTHON_BIN" -c "import cv2, numpy" >/dev/null 2>&1; then
-  echo "Installing local OpenCV vision support..."
-  pkg install x11-repo -y
-
-  pkg install dbus -y
-
-  if ! pkg install opencv-python python-numpy -y; then
-    echo
-    echo "WARNING: OpenCV could not be installed automatically."
-    echo "Desk Buddy will still run, but camera face/hand tracking will stay disabled."
-    echo "You can retry later with:"
-    echo "  pkg install x11-repo"
-    echo "  pkg install opencv-python python-numpy"
-    echo
-  fi
 fi
 
 LAUNCHER="$PREFIX/bin/desk-buddy"
@@ -73,19 +55,18 @@ echo
 echo "Old terminal fallback:"
 echo "  desk-buddy --terminal"
 echo
-echo "Camera gesture diagnostic:"
-echo "  desk-buddy --vision-test"
-echo
 echo "Direct OLED playback diagnostic:"
 echo "  desk-buddy --test-oled"
 echo
 echo "IMPORTANT:"
 echo "Native graphics require the Termux:GUI Android plugin app."
-echo "Shake + tilt + camera + gibber audio require the Termux:API Android plugin app."
+echo "Shake + tilt + gibber audio require the Termux:API Android plugin app."
 echo "Install both plugins from the SAME source as your Termux app."
-echo "The first camera run may ask for Android camera permission."
+echo "Games:"
+echo "  Double-tap or long-press the face to open Game Hub."
+echo "  Includes Tic-Tac-Toe vs Buddy, Pong vs Buddy, Snake, and OLED Show."
 echo
-echo "Optional right-hand OLED show:"
+echo "Optional OLED show asset:"
 echo "  Keep animation_frames.h or animation_frames(1).h in this project"
 echo "  OR in your phone Downloads folder."
 echo "  The player reads your local frame file directly."
