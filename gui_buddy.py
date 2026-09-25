@@ -1482,6 +1482,7 @@ class RoboEyesFace:
             and s.manual_until == 0.0
             and now >= s.next_auto_emotion
             and now >= s.wave_until
+            and not self.scenes.current
         ):
             self.set_emotion(random.choice(AUTO_EMOTION_POOL))
 
@@ -1490,6 +1491,7 @@ class RoboEyesFace:
             and s.manual_until == 0.0
             and now >= s.next_wave
             and now >= s.wave_until
+            and not self.scenes.current
         ):
             self.trigger_wave()
 
