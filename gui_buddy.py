@@ -699,7 +699,8 @@ class EmotionEffects:
         proud_i = self.intensity["proud"]
         bored_i = self.intensity["bored"]
 
-        if happy_i > 0.05 and now - self.last_firework >= 0.62:
+        # Full-screen happy rockets are rendered by SceneEngine.
+        if False and happy_i > 0.05 and now - self.last_firework >= 0.62:
             self._spawn_firework()
             self.last_firework = now
 
@@ -715,7 +716,8 @@ class EmotionEffects:
             self._spawn_sleepy()
             self.last_sleepy = now
 
-        if sad_i > 0.05:
+        # Full-screen sad rain is rendered by SceneEngine.
+        if False and sad_i > 0.05:
             self._ensure_rain(eye_color)
 
         self._update_rockets(dt)
@@ -1432,6 +1434,10 @@ class RoboEyesFace:
             s.eye_r_h_next = 1.0
             s.eye_l_open = False
             s.eye_r_open = False
+            s.eye_l_h = (s.eye_l_h + 1.0) / 2.0
+            s.eye_r_h = (s.eye_r_h + 1.0) / 2.0
+            s.eye_l_y += (s.eye_l_h_default - s.eye_l_h) / 2.0
+            s.eye_r_y += (s.eye_r_h_default - s.eye_r_h) / 2.0
             s.tilt_x += (s.tilt_target_x - s.tilt_x) * 0.05
             s.tilt_y += (s.tilt_target_y - s.tilt_y) * 0.05
             self.scenes.update(now, allow_random=False, sleeping=True)
@@ -1972,6 +1978,15 @@ class RoboEyesFace:
 
         self.update(now)
         canvas.clear()
+
+        self.scenes.draw(
+            canvas,
+            now,
+            dt,
+            mood=s.mood_name,
+            eye_color=CYAN,
+            sleeping=s.sleeping,
+        )
 
         self.effects.update_and_draw(
             oled,
