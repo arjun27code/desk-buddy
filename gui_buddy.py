@@ -2196,6 +2196,7 @@ class SensorFeed:
 
         self.fusion = SensorFusion()
         self.sensor_request = discover_sensor_request()
+        self.sensor_announced = False
 
     def available(self) -> bool:
         return shutil.which("termux-sensor") is not None
@@ -2286,6 +2287,18 @@ class SensorFeed:
 
         with self.face.lock:
             self.face.set_sensor_tilt(tilt_x, tilt_y)
+
+            if (
+                not self.sensor_announced
+                and self.fusion.baseline_roll is not None
+                and self.fusion.baseline_pitch is not None
+            ):
+                self.face.voice.say(
+                    "Motion sensors online.",
+                    caption_seconds=2.8,
+                )
+                self.sensor_announced = True
+
             if shake:
                 self.face.handle_shake()
 
