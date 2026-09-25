@@ -1371,6 +1371,55 @@ class RoboEyesFace:
         self.state.tilt_target_x = clamp(tilt_x, -1.0, 1.0)
         self.state.tilt_target_y = clamp(tilt_y, -1.0, 1.0)
 
+    def set_camera_attention(
+        self,
+        present: bool,
+        face_x: float = 0.0,
+        face_y: float = 0.0,
+    ) -> None:
+        s = self.state
+        now = time.monotonic()
+
+        s.camera_present = bool(present)
+
+        if not present:
+            return
+
+        s.camera_x = clamp(face_x, -1.0, 1.0)
+        s.camera_y = clamp(face_y, -1.0, 1.0)
+        s.camera_last_seen = now
+
+        if not s.camera_announced:
+            self.voice.say(
+                "Camera attention online.",
+                caption_seconds=2.8,
+            )
+            s.camera_announced = True
+
+    def camera_bored_reaction(self) -> None:
+        s = self.state
+        if s.sleeping:
+            return
+
+        # Camera boredom is an authored reaction rather than a permanent state.
+        if random.random() < 0.55:
+            self.set_emotion("annoyed", random.uniform(5.0, 7.5))
+            self.voice.say(
+                random.choice(
+                    [
+                        "You have been sitting there for a while.",
+                        "We are still sitting here.",
+                        "I am getting bored watching this.",
+                    ]
+                ),
+                force=True,
+            )
+        else:
+            self.scenes.force(
+                random.choice(["peek", "walk", "park"]),
+                random.uniform(7.0, 11.0),
+            )
+
     def on_touch(
         self,
         action: str,
@@ -1474,6 +1523,9 @@ class RoboEyesFace:
             sleeping=False,
         )
 
+        if s.camera_present and now - s.camera_last_seen > 2.8:
+            s.camera_present = False
+
         if s.mood_name == "idle" and self.scenes.current:
             if self.scenes.current in {"bike", "car"}:
                 self.set_position("DEFAULT")
@@ -1481,9 +1533,59 @@ class RoboEyesFace:
             elif self.scenes.current == "park":
                 self.set_position("S")
                 s.curious = False
-            elif self.scenes.current == "rainbow":
+            elif self.scenes.current in {"rainbow", "sunny", "night"}:
                 self.set_position("N")
                 s.curious = True
+            elif self.scenes.current == "peek":
+                max_x = self._constraint_x()
+                max_y = self._constraint_y()
+                s.eye_l_x_next = (
+                    max_x
+                    if self.scenes.peek_side > 0
+                    else 0.0
+                )
+                s.eye_l_y_next = max_y * 0.46
+                s.idle = False
+                s.curious = True
+
+        camera_can_drive_gaze = (
+            s.camera_present
+            and s.mood_name == "idle"
+            and not self.scenes.current
+            and s.wave_until <= now
+            and s.manual_until == 0.0
+        )
+
+        if camera_can_drive_gaze:
+            max_x = self._constraint_x()
+            max_y = self._constraint_y()
+
+            # Mirrored front-camera coordinates feel like eye contact rather
+            # than CCTV: person on screen-left makes Buddy look screen-left.
+            nx = clamp(
+                (s.camera_x + 1.0) / 2.0,
+                0.0,
+                1.0,
+            )
+            ny = clamp(
+                (s.camera_y + 1.0) / 2.0,
+                0.0,
+                1.0,
+            )
+
+            s.eye_l_x_next = nx * max_x
+            s.eye_l_y_next = ny * max_y
+            s.idle = False
+            s.curious = True
+
+        elif (
+            not s.camera_present
+            and s.mood_name == "idle"
+            and not self.scenes.current
+            and s.wave_until <= now
+            and s.manual_until == 0.0
+        ):
+            s.idle = True
 
         if (
             s.mood_name == "idle"
@@ -1520,7 +1622,12 @@ class RoboEyesFace:
             self.blink()
             s.next_blink = self._next_blink(now)
 
-        if s.idle and s.manual_until == 0.0 and now >= s.next_idle:
+        if (
+            s.idle
+            and not camera_can_drive_gaze
+            and s.manual_until == 0.0
+            and now >= s.next_idle
+        ):
             max_x = max(1, int(self._constraint_x()))
             max_y = max(1, int(self._constraint_y()))
             s.eye_l_x_next = float(random.randrange(max_x))
