@@ -47,6 +47,22 @@ Each emotion has its own transition and visual behavior:
 
 Background effects fade in and out rather than appearing instantly.
 
+## Hand-animated expression layer
+
+The native renderer keeps the RoboEyes geometry, but emotion entry animations now use a second animation layer inspired by frame-by-frame 128x64 OLED animation techniques:
+
+- 64 ms pose cadence layered over the smooth 50 FPS renderer
+- anticipation before a major expression
+- squash and stretch
+- overshoot and settle
+- short pose holds
+- tiny deterministic hand-drawn wobble
+- asymmetry between left and right eyes
+- temporary motion/accent lines around expressions
+- different entry motion for each emotion
+
+This is intentionally an animation-language adaptation, not a copy of another animation's artwork or frames.
+
 ## Motion sensors
 
 Desk Buddy can react to the physical phone through Termux:API.
