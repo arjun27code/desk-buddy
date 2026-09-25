@@ -355,3 +355,47 @@ The first camera capture may ask Android for Camera permission. Grant it to the 
     desk-buddy
 
 Keep the phone reasonably still for the first couple of seconds for motion-sensor calibration.
+
+
+## Right-hand five-finger OLED trigger
+
+The mirrored front-camera vision layer now distinguishes a five-finger open-palm gesture on the user's right-hand side.
+
+When the right hand is detected stably for multiple camera snapshots:
+
+1. Desk Buddy wakes if needed.
+2. It starts the local Arduino OLED frame sequence.
+3. The animation frame order comes from `epd_bitmap_allArray`.
+4. The frame delay is read from the local Arduino sketch when available.
+5. After the sequence finishes, Desk Buddy returns to its normal personality.
+
+The large bitmap payload is not duplicated inside the repository. The player reads the user's local copy directly.
+
+Supported filenames:
+
+    animation_frames.h
+    animation_frames(1).h
+
+Optional sketch timing files:
+
+    loveMeNotOledLyrics.ino
+    loveMeNotOledLyrics(1).ino
+
+These can be kept in the project folder or the phone Downloads folder.
+
+If Termux cannot read Downloads, run once:
+
+    termux-setup-storage
+
+Then grant the Android storage permission.
+
+## Front-camera preview
+
+The mirrored front camera is also rendered as a small preview in the top-right corner of the native pixel canvas.
+
+- source: front camera
+- opacity: 40%
+- no separate Android overlay window
+- camera frame is alpha-blended directly into the Desk Buddy render buffer
+- the clock has moved to top-center so it does not overlap the preview
+- `CAM● RH5` appears when a stable right-hand five-finger pose is currently detected
