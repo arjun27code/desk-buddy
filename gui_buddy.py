@@ -1002,6 +1002,8 @@ class RoboState:
 
     last_tap_at: float = 0.0
     tap_streak: int = 0
+    tap_pending: bool = False
+    tap_pending_until: float = 0.0
 
     touch_down_at: float = 0.0
     touch_down_x: float = 0.0
@@ -1372,69 +1374,20 @@ class RoboEyesFace:
         self.state.tilt_target_x = clamp(tilt_x, -1.0, 1.0)
         self.state.tilt_target_y = clamp(tilt_y, -1.0, 1.0)
 
-    def set_camera_attention(
-        self,
-        present: bool,
-        face_x: float = 0.0,
-        face_y: float = 0.0,
-    ) -> None:
-        s = self.state
-        now = time.monotonic()
-
-        s.camera_present = bool(present)
-
-        if not present:
-            return
-
-        s.camera_x = clamp(face_x, -1.0, 1.0)
-        s.camera_y = clamp(face_y, -1.0, 1.0)
-        s.camera_last_seen = now
-
-        if not s.camera_announced:
-            self.voice.say(
-                "Camera attention online.",
-                caption_seconds=2.8,
-            )
-            s.camera_announced = True
-
-    def camera_bored_reaction(self) -> None:
-        s = self.state
-        if s.sleeping:
-            return
-
-        # Camera boredom is an authored reaction rather than a permanent state.
-        if random.random() < 0.55:
-            self.set_emotion("annoyed", random.uniform(5.0, 7.5))
-            self.voice.say(
-                random.choice(
-                    [
-                        "You have been sitting there for a while.",
-                        "We are still sitting here.",
-                        "I am getting bored watching this.",
-                    ]
-                ),
-                force=True,
-            )
-        else:
-            self.scenes.force(
-                random.choice(["peek", "walk", "park"]),
-                random.uniform(7.0, 11.0),
-            )
-
     def on_touch(
         self,
         action: str,
         x: float,
         y: float,
         oled: VirtualOLED,
-    ) -> None:
+    ) -> str | None:
         s = self.state
         now = time.monotonic()
         vx, vy = oled.phone_to_virtual(x, y)
 
         if s.sleeping and action == "down":
             self.wake_up()
-            return
+            return None
 
         if action == "down":
             s.touch_down_at = now
@@ -1465,11 +1418,31 @@ class RoboEyesFace:
                 s.touch_last_y - s.touch_down_y,
             )
 
+            # ARNAB's hardware Desk Buddy uses a double-tap as its main
+            # interaction gesture. We keep that interaction idea, but route it
+            # to our local game hub instead of copying its ESP32 code.
             if duration <= 0.35 and distance <= 28.0:
-                self.cycle_emotion()
-            elif s.mood_name == "idle":
+                if s.tap_pending and now <= s.tap_pending_until:
+                    s.tap_pending = False
+                    s.tap_pending_until = 0.0
+                    s.last_tap_at = now
+                    return "games"
+
+                s.tap_pending = True
+                s.tap_pending_until = now + 0.34
+                s.last_tap_at = now
+                return None
+
+            if duration >= 0.80 and distance <= 34.0:
+                s.tap_pending = False
+                s.tap_pending_until = 0.0
+                return "games"
+
+            if s.mood_name == "idle":
                 s.idle = True
                 s.next_idle = self._next_idle(now)
+
+        return None
 
     def _update_curiosity(self) -> None:
         s = self.state
