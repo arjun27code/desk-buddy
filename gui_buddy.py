@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import math
 import random
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -17,18 +20,54 @@ except ModuleNotFoundError:
     raise SystemExit(2)
 
 
-# The face below is an independent Python/Termux:GUI adaptation of the
-# public behavior and geometry documented by FluxGarage RoboEyes.
-# Reference project: https://github.com/FluxGarage/RoboEyes
 VIRTUAL_W = 128.0
 VIRTUAL_H = 64.0
 FPS = 50.0
 FRAME_TIME = 1.0 / FPS
-EMOTION_HOLD = 2.5
-EMOTION_CYCLE = ["happy", "curious", "annoyed", "sad"]
+
+EMOTION_HOLD = 5.5
+DIZZY_HOLD = 6.0
+EMOTION_CYCLE = [
+    "happy",
+    "curious",
+    "annoyed",
+    "sad",
+    "surprised",
+    "sleepy",
+    "love",
+    "excited",
+]
 
 BLACK = (0, 0, 0, 255)
 CYAN = (18, 238, 242, 255)
+CYAN_DIM = (7, 100, 106, 255)
+BLUE = (20, 90, 210, 255)
+WHITE = (240, 255, 255, 255)
+YELLOW = (255, 214, 70, 255)
+MAGENTA = (255, 65, 175, 255)
+RED = (255, 70, 70, 255)
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def smoothstep(value: float) -> float:
+    x = clamp(value, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def dim_color(
+    color: tuple[int, int, int, int],
+    strength: float,
+) -> tuple[int, int, int, int]:
+    s = clamp(strength, 0.0, 1.0)
+    return (
+        int(color[0] * s),
+        int(color[1] * s),
+        int(color[2] * s),
+        255,
+    )
 
 
 class PixelCanvas:
@@ -118,6 +157,72 @@ class PixelCanvas:
 
             self.span(y + row, x + inset, x + w - inset, color)
 
+    def circle(
+        self,
+        cx: float,
+        cy: float,
+        radius: float,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        if radius <= 0:
+            return
+
+        top = int(math.floor(cy - radius))
+        bottom = int(math.ceil(cy + radius))
+
+        for yy in range(top, bottom + 1):
+            dy = yy + 0.5 - cy
+            inside = radius * radius - dy * dy
+            if inside < 0:
+                continue
+
+            half = math.sqrt(inside)
+            self.span(
+                yy,
+                int(math.floor(cx - half)),
+                int(math.ceil(cx + half)) + 1,
+                color,
+            )
+
+    def line(
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        color: tuple[int, int, int, int],
+        thickness: int = 1,
+    ) -> None:
+        x1_i = int(round(x1))
+        y1_i = int(round(y1))
+        x2_i = int(round(x2))
+        y2_i = int(round(y2))
+
+        dx = abs(x2_i - x1_i)
+        dy = -abs(y2_i - y1_i)
+        sx = 1 if x1_i < x2_i else -1
+        sy = 1 if y1_i < y2_i else -1
+        err = dx + dy
+
+        x = x1_i
+        y = y1_i
+
+        while True:
+            half = max(0, thickness // 2)
+            for yy in range(y - half, y + half + 1):
+                self.span(yy, x - half, x + half + 1, color)
+
+            if x == x2_i and y == y2_i:
+                break
+
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x += sx
+            if e2 <= dx:
+                err += dx
+                y += sy
+
     def polygon(
         self,
         points: Iterable[tuple[float, float]],
@@ -158,13 +263,8 @@ class PixelCanvas:
 
 
 class VirtualOLED:
-    """Maps an exact 128x64 RoboEyes-style coordinate system to the phone."""
-
     def __init__(self, canvas: PixelCanvas):
         self.canvas = canvas
-
-        # Do not stretch the eyes to the whole phone. A 128x64 OLED is 2:1,
-        # so keep that visual window intact and center it on the phone.
         target_w = canvas.width * 0.90
         self.scale = target_w / VIRTUAL_W
         self.ox = (canvas.width - VIRTUAL_W * self.scale) / 2.0
@@ -198,6 +298,38 @@ class VirtualOLED:
             color,
         )
 
+    def circle(
+        self,
+        x: float,
+        y: float,
+        radius: float,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        self.canvas.circle(
+            self.x(x),
+            self.y(y),
+            self.s(radius),
+            color,
+        )
+
+    def line(
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        color: tuple[int, int, int, int],
+        thickness: float = 1.0,
+    ) -> None:
+        self.canvas.line(
+            self.x(x1),
+            self.y(y1),
+            self.x(x2),
+            self.y(y2),
+            color,
+            max(1, int(round(self.s(thickness)))),
+        )
+
     def polygon(
         self,
         points: Iterable[tuple[float, float]],
@@ -216,8 +348,356 @@ class VirtualOLED:
 
 
 @dataclass
+class Particle:
+    x: float
+    y: float
+    vx: float
+    vy: float
+    life: float
+    ttl: float
+    size: float
+    color: tuple[int, int, int, int]
+
+
+class EmotionEffects:
+    def __init__(self):
+        self.fireworks: list[Particle] = []
+        self.confetti: list[Particle] = []
+        self.rain: list[Particle] = []
+        self.hearts: list[Particle] = []
+        self.sleepy_marks: list[Particle] = []
+
+        self.last_firework = 0.0
+        self.last_confetti = 0.0
+        self.last_heart = 0.0
+        self.last_sleepy = 0.0
+
+        self.intensity = {
+            name: 0.0
+            for name in [
+                "happy",
+                "curious",
+                "annoyed",
+                "sad",
+                "surprised",
+                "sleepy",
+                "love",
+                "excited",
+                "dizzy",
+            ]
+        }
+
+        self.sparkles = [
+            (
+                random.uniform(5, 123),
+                random.uniform(4, 60),
+                random.uniform(0, math.tau),
+            )
+            for _ in range(14)
+        ]
+
+    def _approach_intensity(self, mood: str, dt: float) -> None:
+        for name in self.intensity:
+            target = 1.0 if mood == name else 0.0
+            speed = 4.0 if target > self.intensity[name] else 2.4
+            delta = speed * dt
+
+            if self.intensity[name] < target:
+                self.intensity[name] = min(target, self.intensity[name] + delta)
+            else:
+                self.intensity[name] = max(target, self.intensity[name] - delta)
+
+    def _spawn_firework(self) -> None:
+        origin_x = random.uniform(18, 110)
+        origin_y = random.uniform(7, 30)
+        color = random.choice([CYAN, WHITE, YELLOW, MAGENTA])
+
+        for index in range(18):
+            angle = math.tau * index / 18.0 + random.uniform(-0.12, 0.12)
+            speed = random.uniform(15.0, 27.0)
+            self.fireworks.append(
+                Particle(
+                    x=origin_x,
+                    y=origin_y,
+                    vx=math.cos(angle) * speed,
+                    vy=math.sin(angle) * speed,
+                    life=0.0,
+                    ttl=random.uniform(0.75, 1.2),
+                    size=random.uniform(0.5, 1.2),
+                    color=color,
+                )
+            )
+
+    def _spawn_confetti(self) -> None:
+        for _ in range(9):
+            self.confetti.append(
+                Particle(
+                    x=random.uniform(5, 123),
+                    y=-2,
+                    vx=random.uniform(-5, 5),
+                    vy=random.uniform(12, 22),
+                    life=0.0,
+                    ttl=random.uniform(1.4, 2.4),
+                    size=random.uniform(0.8, 1.6),
+                    color=random.choice([CYAN, YELLOW, MAGENTA, WHITE]),
+                )
+            )
+
+    def _spawn_heart(self) -> None:
+        self.hearts.append(
+            Particle(
+                x=random.uniform(10, 118),
+                y=65,
+                vx=random.uniform(-2.5, 2.5),
+                vy=random.uniform(-9, -15),
+                life=0.0,
+                ttl=random.uniform(2.5, 4.0),
+                size=random.uniform(1.4, 2.5),
+                color=random.choice([MAGENTA, CYAN, WHITE]),
+            )
+        )
+
+    def _spawn_sleepy(self) -> None:
+        self.sleepy_marks.append(
+            Particle(
+                x=random.uniform(83, 112),
+                y=random.uniform(26, 48),
+                vx=random.uniform(0.5, 1.8),
+                vy=random.uniform(-3.5, -6.0),
+                life=0.0,
+                ttl=random.uniform(2.0, 3.2),
+                size=random.uniform(1.2, 1.8),
+                color=CYAN_DIM,
+            )
+        )
+
+    def _ensure_rain(self) -> None:
+        while len(self.rain) < 30:
+            self.rain.append(
+                Particle(
+                    x=random.uniform(0, 128),
+                    y=random.uniform(-20, 64),
+                    vx=random.uniform(-2.0, -0.5),
+                    vy=random.uniform(24, 42),
+                    life=0.0,
+                    ttl=9999,
+                    size=random.uniform(0.5, 1.2),
+                    color=BLUE,
+                )
+            )
+
+    def _draw_heart(
+        self,
+        oled: VirtualOLED,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        points = [
+            (x, y + size * 0.9),
+            (x - size * 1.1, y - size * 0.15),
+            (x - size * 0.95, y - size * 0.75),
+            (x - size * 0.45, y - size),
+            (x, y - size * 0.55),
+            (x + size * 0.45, y - size),
+            (x + size * 0.95, y - size * 0.75),
+            (x + size * 1.1, y - size * 0.15),
+        ]
+        oled.polygon(points, color)
+
+    def _draw_z(
+        self,
+        oled: VirtualOLED,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple[int, int, int, int],
+    ) -> None:
+        oled.line(x, y, x + size, y, color, 0.7)
+        oled.line(x + size, y, x, y + size, color, 0.7)
+        oled.line(x, y + size, x + size, y + size, color, 0.7)
+
+    def _update_particles(
+        self,
+        particles: list[Particle],
+        dt: float,
+        gravity: float = 0.0,
+    ) -> None:
+        alive = []
+
+        for p in particles:
+            p.life += dt
+            if p.life >= p.ttl:
+                continue
+
+            p.vy += gravity * dt
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+            alive.append(p)
+
+        particles[:] = alive
+
+    def update_and_draw(
+        self,
+        oled: VirtualOLED,
+        mood: str,
+        now: float,
+        dt: float,
+    ) -> None:
+        self._approach_intensity(mood, dt)
+
+        happy_i = self.intensity["happy"]
+        sad_i = self.intensity["sad"]
+        curious_i = self.intensity["curious"]
+        annoyed_i = self.intensity["annoyed"]
+        surprised_i = self.intensity["surprised"]
+        sleepy_i = self.intensity["sleepy"]
+        love_i = self.intensity["love"]
+        excited_i = self.intensity["excited"]
+        dizzy_i = self.intensity["dizzy"]
+
+        if happy_i > 0.05 and now - self.last_firework >= 0.75:
+            self._spawn_firework()
+            self.last_firework = now
+
+        if excited_i > 0.05 and now - self.last_confetti >= 0.30:
+            self._spawn_confetti()
+            self.last_confetti = now
+
+        if love_i > 0.05 and now - self.last_heart >= 0.32:
+            self._spawn_heart()
+            self.last_heart = now
+
+        if sleepy_i > 0.05 and now - self.last_sleepy >= 0.75:
+            self._spawn_sleepy()
+            self.last_sleepy = now
+
+        if sad_i > 0.05:
+            self._ensure_rain()
+
+        self._update_particles(self.fireworks, dt, gravity=12.0)
+        self._update_particles(self.confetti, dt, gravity=8.0)
+        self._update_particles(self.hearts, dt, gravity=-0.4)
+        self._update_particles(self.sleepy_marks, dt, gravity=-0.2)
+
+        for p in self.fireworks:
+            fade = (1.0 - p.life / p.ttl) * max(happy_i, 0.25)
+            oled.line(
+                p.x - p.vx * 0.025,
+                p.y - p.vy * 0.025,
+                p.x,
+                p.y,
+                dim_color(p.color, fade),
+                p.size,
+            )
+
+        if sad_i > 0.01:
+            for p in self.rain:
+                p.x += p.vx * dt
+                p.y += p.vy * dt
+
+                if p.y > 72:
+                    p.y = random.uniform(-18, -2)
+                    p.x = random.uniform(0, 128)
+
+                if p.x < -4:
+                    p.x = 132
+
+                oled.line(
+                    p.x,
+                    p.y,
+                    p.x - 2.0,
+                    p.y + 6.0,
+                    dim_color(BLUE, 0.70 * sad_i),
+                    p.size,
+                )
+
+        if curious_i > 0.01:
+            for index, (x, y, phase) in enumerate(self.sparkles):
+                pulse = 0.5 + 0.5 * math.sin(now * 4.2 + phase + index)
+                strength = curious_i * (0.18 + 0.62 * pulse)
+                oled.circle(
+                    x,
+                    y,
+                    0.55 + pulse * 0.55,
+                    dim_color(CYAN, strength),
+                )
+
+        if annoyed_i > 0.01:
+            jitter = math.sin(now * 24.0) * 1.2
+            color = dim_color(RED, 0.75 * annoyed_i)
+
+            for y in (19, 27, 35, 43):
+                oled.line(2, y + jitter, 15, y + jitter, color, 0.8)
+                oled.line(113, y - jitter, 126, y - jitter, color, 0.8)
+
+        if surprised_i > 0.01:
+            color = dim_color(WHITE, 0.55 * surprised_i)
+
+            for index in range(10):
+                angle = now * 0.8 + math.tau * index / 10.0
+                r1 = 44.0
+                r2 = 51.0 + math.sin(now * 5.0 + index) * 2.0
+
+                oled.line(
+                    64 + math.cos(angle) * r1,
+                    32 + math.sin(angle) * r1 * 0.55,
+                    64 + math.cos(angle) * r2,
+                    32 + math.sin(angle) * r2 * 0.55,
+                    color,
+                    0.65,
+                )
+
+        for p in self.sleepy_marks:
+            fade = (1.0 - p.life / p.ttl) * max(sleepy_i, 0.20)
+            self._draw_z(
+                oled,
+                p.x,
+                p.y,
+                p.size * 3.0,
+                dim_color(CYAN, fade * 0.65),
+            )
+
+        for p in self.hearts:
+            fade = (1.0 - p.life / p.ttl) * max(love_i, 0.25)
+            self._draw_heart(
+                oled,
+                p.x,
+                p.y,
+                p.size,
+                dim_color(p.color, fade),
+            )
+
+        for p in self.confetti:
+            fade = (1.0 - p.life / p.ttl) * max(excited_i, 0.20)
+            oled.line(
+                p.x,
+                p.y,
+                p.x + p.vx * 0.09,
+                p.y + 2.5,
+                dim_color(p.color, fade),
+                p.size,
+            )
+
+        if dizzy_i > 0.01:
+            for index in range(8):
+                angle = now * 3.0 + math.tau * index / 8.0
+                radius = 45.0 + 4.0 * math.sin(now * 2.0 + index)
+                x = 64 + math.cos(angle) * radius
+                y = 32 + math.sin(angle) * radius * 0.45
+                color = [YELLOW, WHITE, MAGENTA, CYAN][index % 4]
+
+                oled.circle(
+                    x,
+                    y,
+                    1.0 + (index % 2) * 0.45,
+                    dim_color(color, 0.65 * dizzy_i),
+                )
+
+
+@dataclass
 class RoboState:
-    # Default RoboEyes geometry.
     eye_l_w_default: float = 36.0
     eye_l_h_default: float = 36.0
     eye_r_w_default: float = 36.0
@@ -226,7 +706,6 @@ class RoboState:
     radius_r_default: float = 8.0
     space_default: float = 10.0
 
-    # Current and next geometry. Eyes intentionally start almost closed.
     eye_l_w: float = 36.0
     eye_l_h: float = 1.0
     eye_r_w: float = 36.0
@@ -293,8 +772,17 @@ class RoboState:
     laugh_until: float = 0.0
 
     mood_name: str = "idle"
+    mood_started: float = 0.0
     mood_until: float = 0.0
+    transition_duration: float = 0.7
     cycle_index: int = 0
+
+    tilt_target_x: float = 0.0
+    tilt_target_y: float = 0.0
+    tilt_x: float = 0.0
+    tilt_y: float = 0.0
+
+    dizzy_started: float = 0.0
 
     touch_down_at: float = 0.0
     touch_down_x: float = 0.0
@@ -308,6 +796,8 @@ class RoboEyesFace:
     def __init__(self):
         self.state = RoboState()
         self.lock = threading.Lock()
+        self.effects = EmotionEffects()
+        self.last_draw = time.monotonic()
 
         now = time.monotonic()
         self.state.next_blink = self._next_blink(now)
@@ -329,10 +819,7 @@ class RoboEyesFace:
 
     def _constraint_x(self) -> float:
         s = self.state
-        return max(
-            0.0,
-            VIRTUAL_W - s.eye_l_w - s.space - s.eye_r_w,
-        )
+        return max(0.0, VIRTUAL_W - s.eye_l_w - s.space - s.eye_r_w)
 
     def _constraint_y(self) -> float:
         return max(0.0, VIRTUAL_H - self.state.eye_l_h_default)
@@ -361,9 +848,9 @@ class RoboEyesFace:
 
     def set_mood(self, mood: str) -> None:
         s = self.state
-        s.tired = mood == "tired"
+        s.tired = mood in {"tired", "sleepy"}
         s.angry = mood == "angry"
-        s.happy = mood == "happy"
+        s.happy = mood in {"happy", "excited"}
 
     def close(self) -> None:
         s = self.state
@@ -381,16 +868,52 @@ class RoboEyesFace:
         self.close()
         self.open()
 
-    def set_emotion(self, mood: str) -> None:
+    def _reset_geometry_targets(self) -> None:
+        s = self.state
+        s.eye_l_w_next = s.eye_l_w_default
+        s.eye_r_w_next = s.eye_r_w_default
+        s.eye_l_h_next = s.eye_l_h_default
+        s.eye_r_h_next = s.eye_r_h_default
+        s.radius_l_next = s.radius_l_default
+        s.radius_r_next = s.radius_r_default
+        s.space_next = s.space_default
+
+    def _transition_progress(self, now: float) -> float:
+        s = self.state
+        if s.mood_started <= 0:
+            return 1.0
+
+        return smoothstep(
+            (now - s.mood_started) / max(0.05, s.transition_duration)
+        )
+
+    def set_emotion(self, mood: str, hold: float | None = None) -> None:
         s = self.state
         now = time.monotonic()
 
-        # Clear behavior left by previous emotion.
+        self._reset_geometry_targets()
+
         s.h_flicker = False
         s.v_flicker = False
         s.laugh = False
 
         s.mood_name = mood
+        s.mood_started = now
+
+        transition_map = {
+            "idle": 0.85,
+            "happy": 0.65,
+            "curious": 0.90,
+            "annoyed": 0.55,
+            "sad": 1.05,
+            "surprised": 0.40,
+            "sleepy": 1.25,
+            "love": 0.70,
+            "excited": 0.45,
+            "dizzy": 0.30,
+        }
+        s.transition_duration = transition_map.get(mood, 0.7)
+
         if mood == "idle":
             s.mood_until = 0.0
             self.set_mood("default")
@@ -399,14 +922,14 @@ class RoboEyesFace:
             s.curious = True
             return
 
-        s.mood_until = now + EMOTION_HOLD
+        s.mood_until = now + (hold if hold is not None else EMOTION_HOLD)
 
         if mood == "happy":
             self.set_mood("happy")
             s.idle = False
             s.curious = True
             s.laugh = True
-            s.laugh_until = now + 0.5
+            s.laugh_until = now + 0.8
 
         elif mood == "curious":
             self.set_mood("default")
@@ -427,11 +950,73 @@ class RoboEyesFace:
             s.idle = False
             s.curious = True
 
+        elif mood == "surprised":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+            s.eye_l_w_next = 28.0
+            s.eye_r_w_next = 28.0
+            s.eye_l_h_next = 44.0
+            s.eye_r_h_next = 44.0
+            s.radius_l_next = 12.0
+            s.radius_r_next = 12.0
+            s.space_next = 14.0
+
+        elif mood == "sleepy":
+            self.set_mood("sleepy")
+            self.set_position("S")
+            s.idle = False
+            s.curious = False
+            s.eye_l_h_next = 24.0
+            s.eye_r_h_next = 24.0
+
+        elif mood == "love":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+            s.eye_l_w_next = 34.0
+            s.eye_r_w_next = 34.0
+            s.eye_l_h_next = 34.0
+            s.eye_r_h_next = 34.0
+            s.space_next = 14.0
+
+        elif mood == "excited":
+            self.set_mood("excited")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = True
+            s.v_flicker = True
+            s.v_flicker_amp = 3.0
+            s.eye_l_h_next = 40.0
+            s.eye_r_h_next = 40.0
+
+        elif mood == "dizzy":
+            self.set_mood("default")
+            s.idle = False
+            s.curious = False
+            s.dizzy_started = now
+            s.eye_l_w_next = 32.0
+            s.eye_r_w_next = 32.0
+            s.eye_l_h_next = 32.0
+            s.eye_r_h_next = 32.0
+            s.space_next = 16.0
+
+    def trigger_dizzy(self) -> None:
+        if self.state.mood_name == "dizzy":
+            return
+        self.set_emotion("dizzy", DIZZY_HOLD)
+
     def cycle_emotion(self) -> None:
         s = self.state
         mood = EMOTION_CYCLE[s.cycle_index]
         s.cycle_index = (s.cycle_index + 1) % len(EMOTION_CYCLE)
         self.set_emotion(mood)
+
+    def set_sensor_tilt(self, tilt_x: float, tilt_y: float) -> None:
+        self.state.tilt_target_x = clamp(tilt_x, -1.0, 1.0)
+        self.state.tilt_target_y = clamp(tilt_y, -1.0, 1.0)
 
     def on_touch(
         self,
@@ -455,9 +1040,8 @@ class RoboEyesFace:
             max_x = self._constraint_x()
             max_y = self._constraint_y()
 
-            # The finger controls the complete pair, just like setPosition().
-            normalized_x = max(0.0, min(1.0, vx / VIRTUAL_W))
-            normalized_y = max(0.0, min(1.0, vy / VIRTUAL_H))
+            normalized_x = clamp(vx / VIRTUAL_W, 0.0, 1.0)
+            normalized_y = clamp(vy / VIRTUAL_H, 0.0, 1.0)
 
             s.eye_l_x_next = normalized_x * max_x
             s.eye_l_y_next = normalized_y * max_y
@@ -487,17 +1071,11 @@ class RoboEyesFace:
             s.eye_r_h_offset = 0.0
             return
 
-        max_x = self._constraint_x()
-
         s.eye_l_h_offset = 8.0 if s.eye_l_x_next <= 10.0 else 0.0
 
         right_next = s.eye_l_x_next + s.eye_l_w + s.space
         right_edge_threshold = VIRTUAL_W - s.eye_r_w - 10.0
         s.eye_r_h_offset = 8.0 if right_next >= right_edge_threshold else 0.0
-
-        # max_x is intentionally read above because the original curiosity
-        # behavior is tied to the same screen constraints used by positions.
-        _ = max_x
 
     def update(self, now: float) -> None:
         s = self.state
@@ -522,18 +1100,24 @@ class RoboEyesFace:
             s.eye_l_y_next = float(random.randrange(max_y))
             s.next_idle = self._next_idle(now)
 
+        transition = self._transition_progress(now)
+
         if s.laugh:
             if now < s.laugh_until:
                 s.v_flicker = True
-                s.v_flicker_amp = 5.0
+                s.v_flicker_amp = 5.0 * transition
             else:
                 s.v_flicker = False
                 s.laugh = False
 
+        if s.mood_name == "annoyed":
+            s.h_flicker_amp = 2.0 * transition
+
+        if s.mood_name == "excited":
+            s.v_flicker_amp = 3.0 * transition
+
         self._update_curiosity()
 
-        # Smooth transitions copied conceptually from RoboEyes:
-        # current = (current + next) / 2.
         s.eye_l_h = (s.eye_l_h + s.eye_l_h_next + s.eye_l_h_offset) / 2.0
         s.eye_l_y += (s.eye_l_h_default - s.eye_l_h) / 2.0
         s.eye_l_y -= s.eye_l_h_offset / 2.0
@@ -581,15 +1165,57 @@ class RoboEyesFace:
         s.eyelid_angry = (s.eyelid_angry + s.eyelid_angry_next) / 2.0
         s.happy_bottom = (s.happy_bottom + s.happy_bottom_next) / 2.0
 
+        s.tilt_x += (s.tilt_target_x - s.tilt_x) * 0.10
+        s.tilt_y += (s.tilt_target_y - s.tilt_y) * 0.10
+
+    def _draw_heart_eye(
+        self,
+        oled: VirtualOLED,
+        center_x: float,
+        center_y: float,
+        size: float,
+    ) -> None:
+        points = [
+            (center_x, center_y + size * 0.9),
+            (center_x - size * 1.05, center_y - size * 0.05),
+            (center_x - size * 0.9, center_y - size * 0.68),
+            (center_x - size * 0.42, center_y - size * 0.95),
+            (center_x, center_y - size * 0.50),
+            (center_x + size * 0.42, center_y - size * 0.95),
+            (center_x + size * 0.9, center_y - size * 0.68),
+            (center_x + size * 1.05, center_y - size * 0.05),
+        ]
+        oled.polygon(points, CYAN)
+
     def draw(self, canvas: PixelCanvas, oled: VirtualOLED, now: float) -> None:
         s = self.state
+
+        dt = clamp(now - self.last_draw, 0.0, 0.08)
+        self.last_draw = now
+
         self.update(now)
         canvas.clear()
+
+        self.effects.update_and_draw(
+            oled,
+            s.mood_name,
+            now,
+            dt,
+        )
 
         lx = s.eye_l_x
         ly = s.eye_l_y
         rx = s.eye_r_x
         ry = s.eye_r_y
+
+        tilt_shift_x = s.tilt_x * 4.0
+        tilt_shift_y = s.tilt_y * 2.5
+        roll = s.tilt_x * 3.0
+
+        lx += tilt_shift_x
+        rx += tilt_shift_x
+        ly += tilt_shift_y + roll
+        ry += tilt_shift_y - roll
 
         if s.h_flicker:
             dx = s.h_flicker_amp if s.h_flicker_alt else -s.h_flicker_amp
@@ -603,7 +1229,30 @@ class RoboEyesFace:
             ly += dy
             ry += dy
 
-        # Base eyes. No pupils, no highlights, no glow.
+        if s.mood_name == "dizzy":
+            elapsed = now - s.dizzy_started
+            orbit = math.sin(elapsed * 9.0) * 5.0
+            opposite = math.cos(elapsed * 7.5) * 4.0
+            lx += orbit
+            rx -= orbit
+            ly += opposite
+            ry -= opposite
+
+        if s.mood_name == "love":
+            self._draw_heart_eye(
+                oled,
+                lx + s.eye_l_w / 2.0,
+                ly + s.eye_l_h / 2.0,
+                12.5,
+            )
+            self._draw_heart_eye(
+                oled,
+                rx + s.eye_r_w / 2.0,
+                ry + s.eye_r_h / 2.0,
+                12.5,
+            )
+            return
+
         oled.rounded_rect(
             lx,
             ly,
@@ -621,7 +1270,6 @@ class RoboEyesFace:
             CYAN,
         )
 
-        # TIRED top eyelids.
         if s.eyelid_tired > 0.05:
             oled.polygon(
                 [
@@ -640,7 +1288,6 @@ class RoboEyesFace:
                 BLACK,
             )
 
-        # ANGRY top eyelids.
         if s.eyelid_angry > 0.05:
             oled.polygon(
                 [
@@ -659,9 +1306,6 @@ class RoboEyesFace:
                 BLACK,
             )
 
-        # HAPPY bottom eyelids. This is intentionally a black rounded rectangle
-        # overlay, matching the RoboEyes drawing method instead of inventing
-        # curved pupils or a separate smile.
         if s.happy_bottom > 0.05:
             oled.rounded_rect(
                 lx - 1,
@@ -679,6 +1323,230 @@ class RoboEyesFace:
                 s.radius_r,
                 BLACK,
             )
+
+        if s.mood_name == "dizzy":
+            elapsed = now - s.dizzy_started
+
+            for cx, cy in [
+                (lx + s.eye_l_w / 2.0, ly + s.eye_l_h / 2.0),
+                (rx + s.eye_r_w / 2.0, ry + s.eye_r_h / 2.0),
+            ]:
+                angle = elapsed * 5.5
+                oled.circle(
+                    cx + math.cos(angle) * 4.0,
+                    cy + math.sin(angle) * 4.0,
+                    3.0,
+                    BLACK,
+                )
+                oled.circle(
+                    cx - math.cos(angle) * 4.0,
+                    cy - math.sin(angle) * 4.0,
+                    1.5,
+                    BLACK,
+                )
+
+
+class SensorFeed:
+    def __init__(self, face: RoboEyesFace):
+        self.face = face
+        self.stop_event = threading.Event()
+        self.process: subprocess.Popen[str] | None = None
+        self.thread: threading.Thread | None = None
+
+        self.baseline_samples: list[tuple[float, float, float]] = []
+        self.baseline: tuple[float, float, float] | None = None
+        self.previous_accel: tuple[float, float, float] | None = None
+        self.last_shake = 0.0
+
+    def available(self) -> bool:
+        return shutil.which("termux-sensor") is not None
+
+    def start(self) -> None:
+        if not self.available():
+            return
+
+        self.thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=1.0)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+
+        if shutil.which("termux-sensor") is not None:
+            try:
+                subprocess.run(
+                    ["termux-sensor", "-c"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                    check=False,
+                )
+            except Exception:
+                pass
+
+    @staticmethod
+    def _values_from_payload(
+        payload: dict,
+        term: str,
+    ) -> tuple[float, float, float] | None:
+        term_lower = term.lower()
+
+        for name, info in payload.items():
+            if term_lower not in str(name).lower():
+                continue
+
+            if not isinstance(info, dict):
+                continue
+
+            values = info.get("values")
+            if not isinstance(values, list) or len(values) < 3:
+                continue
+
+            try:
+                return (
+                    float(values[0]),
+                    float(values[1]),
+                    float(values[2]),
+                )
+            except (TypeError, ValueError):
+                continue
+
+        return None
+
+    def _handle_payload(self, payload: dict) -> None:
+        accel = self._values_from_payload(payload, "accelerometer")
+        gyro = self._values_from_payload(payload, "gyroscope")
+
+        if accel is None:
+            accel = self._values_from_payload(payload, "accel")
+
+        if gyro is None:
+            gyro = self._values_from_payload(payload, "gyro")
+
+        if accel is None and gyro is None:
+            return
+
+        now = time.monotonic()
+
+        if accel is not None:
+            ax, ay, az = accel
+
+            if self.baseline is None:
+                self.baseline_samples.append(accel)
+
+                if len(self.baseline_samples) >= 15:
+                    count = float(len(self.baseline_samples))
+                    self.baseline = (
+                        sum(v[0] for v in self.baseline_samples) / count,
+                        sum(v[1] for v in self.baseline_samples) / count,
+                        sum(v[2] for v in self.baseline_samples) / count,
+                    )
+            else:
+                bx, _by, bz = self.baseline
+
+                tilt_x = clamp((ax - bx) / 5.5, -1.0, 1.0)
+                tilt_y = clamp((az - bz) / 5.5, -1.0, 1.0)
+
+                with self.face.lock:
+                    self.face.set_sensor_tilt(tilt_x, tilt_y)
+
+            if self.previous_accel is not None:
+                px, py, pz = self.previous_accel
+                accel_delta = math.sqrt(
+                    (ax - px) ** 2
+                    + (ay - py) ** 2
+                    + (az - pz) ** 2
+                )
+
+                if accel_delta >= 6.2 and now - self.last_shake >= 2.0:
+                    with self.face.lock:
+                        self.face.trigger_dizzy()
+                    self.last_shake = now
+
+            self.previous_accel = accel
+
+        if gyro is not None:
+            gx, gy, gz = gyro
+            gyro_speed = math.sqrt(gx * gx + gy * gy + gz * gz)
+
+            if gyro_speed >= 5.2 and now - self.last_shake >= 2.0:
+                with self.face.lock:
+                    self.face.trigger_dizzy()
+                self.last_shake = now
+
+    def _run(self) -> None:
+        command = [
+            "termux-sensor",
+            "-s",
+            "accelerometer,gyroscope",
+            "-d",
+            "70",
+        ]
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+        except Exception:
+            return
+
+        if self.process.stdout is None:
+            return
+
+        buffer = ""
+        depth = 0
+
+        try:
+            for line in self.process.stdout:
+                if self.stop_event.is_set():
+                    break
+
+                if not line.strip() and not buffer:
+                    continue
+
+                buffer += line
+                depth += line.count("{") - line.count("}")
+
+                if depth > 0:
+                    continue
+
+                text = buffer.strip()
+                buffer = ""
+                depth = 0
+
+                if not text:
+                    continue
+
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+
+                if isinstance(payload, dict):
+                    self._handle_payload(payload)
+
+        finally:
+            if self.process.poll() is None:
+                try:
+                    self.process.terminate()
+                except Exception:
+                    pass
 
 
 def choose_buffer_size(screen_w_px: int, screen_h_px: int) -> tuple[int, int]:
@@ -744,6 +1612,8 @@ def event_worker(
 
 
 def main() -> int:
+    sensor_feed = None
+
     try:
         with tg.Connection() as connection:
             activity = tg.Activity(connection)
@@ -790,6 +1660,9 @@ def main() -> int:
                 )
                 watcher.start()
 
+                sensor_feed = SensorFeed(face)
+                sensor_feed.start()
+
                 next_frame = time.monotonic()
 
                 while not stop.is_set():
@@ -817,6 +1690,10 @@ def main() -> int:
         print("Make sure Termux and Termux:GUI are installed from the same source.")
         print(f"Details: {exc}")
         return 3
+
+    finally:
+        if sensor_feed is not None:
+            sensor_feed.stop()
 
 
 if __name__ == "__main__":
