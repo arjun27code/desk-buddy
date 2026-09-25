@@ -300,17 +300,96 @@ class SceneEngine:
             canvas.circle(x, y, 1.0 + (index % 3 == 0), dim_color(WHITE, pulse))
 
     def draw_sleep(self, canvas, now: float) -> None:
-        self._draw_stars(canvas, now, 28)
+        self._gradient(
+            canvas,
+            (2, 5, 16, 255),
+            (0, 1, 7, 255),
+        )
+        self._draw_stars(canvas, now, 34)
+
         moon_x = canvas.width * 0.80
-        moon_y = canvas.height * 0.16
-        r = max(13.0, canvas.width * 0.055)
+        moon_y = canvas.height * 0.14
+        r = max(16.0, canvas.width * 0.060)
+        canvas.circle(moon_x, moon_y, r * 1.20, dim_color(BLUE, 0.10))
         canvas.circle(moon_x, moon_y, r, dim_color(WHITE, 0.78))
         canvas.circle(
             moon_x + r * 0.42,
             moon_y - r * 0.14,
             r * 0.92,
-            BLACK,
+            (2, 5, 16, 255),
         )
+
+        # Tiny bed at the bottom. The main RoboEyes face is suppressed while
+        # sleeping, so the bed becomes the actual character scene.
+        floor_y = canvas.height * 0.83
+        bed_x = canvas.width * 0.16
+        bed_w = canvas.width * 0.68
+        bed_h = canvas.height * 0.09
+
+        canvas.rounded_rect(
+            bed_x,
+            floor_y,
+            bed_w,
+            bed_h,
+            max(8, int(canvas.width * 0.025)),
+            dim_color(CYAN, 0.20),
+        )
+        canvas.rounded_rect(
+            bed_x + bed_w * 0.05,
+            floor_y + bed_h * 0.12,
+            bed_w * 0.24,
+            bed_h * 0.52,
+            max(6, int(canvas.width * 0.018)),
+            dim_color(WHITE, 0.28),
+        )
+
+        blanket_x = bed_x + bed_w * 0.30
+        canvas.rounded_rect(
+            blanket_x,
+            floor_y + bed_h * 0.14,
+            bed_w * 0.63,
+            bed_h * 0.62,
+            max(6, int(canvas.width * 0.018)),
+            dim_color(CYAN, 0.17),
+        )
+
+        # Mini sleeping head on the pillow.
+        head_r = canvas.width * 0.052
+        head_x = bed_x + bed_w * 0.20
+        head_y = floor_y + bed_h * 0.38
+        canvas.circle(head_x, head_y, head_r, dim_color(CYAN, 0.72))
+        canvas.circle(head_x, head_y, max(1.0, head_r - 4), BLACK)
+
+        eye_y = head_y
+        eye_dx = head_r * 0.34
+        eye_w = head_r * 0.28
+        canvas.line(
+            head_x - eye_dx - eye_w,
+            eye_y,
+            head_x - eye_dx + eye_w,
+            eye_y,
+            dim_color(CYAN, 0.92),
+            max(1, int(head_r * 0.12)),
+        )
+        canvas.line(
+            head_x + eye_dx - eye_w,
+            eye_y,
+            head_x + eye_dx + eye_w,
+            eye_y,
+            dim_color(CYAN, 0.92),
+            max(1, int(head_r * 0.12)),
+        )
+
+        # Floating Z marks, moving upward rather than being static text.
+        for index in range(3):
+            phase = (now * 0.17 + index * 0.31) % 1.0
+            x = head_x + head_r * 0.95 + phase * canvas.width * 0.12
+            y = head_y - phase * canvas.height * 0.16 - index * 10
+            size = max(6, int(8 + phase * 7))
+            color = dim_color(CYAN, 0.25 + 0.45 * (1.0 - phase))
+            canvas.line(x, y, x + size, y, color, 2)
+            canvas.line(x + size, y, x, y + size, color, 2)
+            canvas.line(x, y + size, x + size, y + size, color, 2)
 
     def _road_geometry(self, canvas):
         horizon = canvas.height * 0.42
