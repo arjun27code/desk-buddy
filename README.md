@@ -2,32 +2,48 @@
 
 A phone-first Desk Buddy that runs directly inside Termux.
 
-This is not a website and does not use localhost or a browser. The phone screen itself becomes the Desk Buddy display.
+The phone screen itself becomes the Desk Buddy display. There is no website, browser UI or localhost server.
 
-## Current behavior
+## Visual system
 
-- Full-screen terminal face
-- Cyan animated eyes
-- Random blinking
-- Eyes look around automatically
-- Happy, sleepy, surprised and focused expressions
-- Cute idle messages
-- Time and date
-- Optional battery reactions
-- Optional weather reactions
-- Charging and low-battery reactions
-- Night-time sleepy behavior
-- One command launch: `desk-buddy`
+The current face is inspired by the visual behavior of small OLED DeskBuddy-style robots:
+
+- Large filled rounded eyes instead of outline boxes
+- Dark pupils inside bright eyes
+- White reflection highlights
+- Smooth gaze interpolation
+- Random eye saccades
+- Fast natural blinks
+- Occasional double blinks
+- Subtle eye breathing
+- Mood-specific eye shapes
+- Clean face-first layout with controls hidden after startup
+
+Moods currently include:
+
+- Normal
+- Happy
+- Love / heart eyes
+- Excited
+- Surprised
+- Sleepy
+- Focused
+- Sad
+- Suspicious
 
 ## Controls
 
 While Desk Buddy is running:
 
 - `B` = boop
-- `SPACE` = random reaction
-- `S` = sleep reaction
+- `SPACE` = random mood
+- `S` = sleepy mode
 - `W` = refresh weather
+- `C` = cycle eye colour
+- `H` = show controls again
 - `Q` = quit
+
+Eye colours currently include cyan, magenta, yellow, green, blue and white.
 
 ## Install
 
@@ -43,21 +59,19 @@ Install the launcher:
 
     bash install.sh
 
-After that you can run it from anywhere:
+Then run it from anywhere:
 
     desk-buddy
 
 ## Updating an existing clone
 
-If you already cloned the repository:
-
     cd ~/desk-buddy
+    git restore start.sh
     git pull origin main
     bash install.sh
-
-Then run:
-
     desk-buddy
+
+The installer no longer changes the tracked `start.sh` file mode, so normal future pulls should stay clean.
 
 ## Weather
 
@@ -67,7 +81,7 @@ For automatic phone location, install the Termux:API Android companion app and t
 
 Desk Buddy will use `termux-location`.
 
-If you do not want Termux:API location, save a city manually:
+If automatic location is unavailable, save a city manually:
 
     desk-buddy --set-city "Your City"
 
@@ -87,7 +101,7 @@ This requires the Termux:API companion app plus:
 
     pkg install termux-api
 
-Without Termux:API the Desk Buddy still runs. Battery and automatic location are simply unavailable.
+Desk Buddy still runs without Termux:API. Battery and automatic location simply remain unavailable.
 
 ## Architecture
 
@@ -96,7 +110,9 @@ Without Termux:API the Desk Buddy still runs. Battery and automatic location are
         |-- Termux
              |
              |-- desk_buddy.py
-             |     |-- animated terminal face
+             |     |-- OLED-style face renderer
+             |     |-- animation physics
+             |     |-- moods
              |     |-- time
              |     |-- weather
              |     |-- battery reactions
@@ -104,8 +120,8 @@ Without Termux:API the Desk Buddy still runs. Battery and automatic location are
              |-- start.sh
              |-- install.sh
 
-There is no HTTP server, browser UI, HTML, CSS or JavaScript in the active implementation.
+## Current limitation
 
-## Next phase
+This version deliberately stays inside the terminal for maximum compatibility. Termux character cells cannot match a true pixel OLED or native Android canvas exactly.
 
-The direct-Termux version is the compatibility-first base. A later visual upgrade can use Termux:GUI for a native Android activity with smoother graphical eyes while keeping Termux as the engine.
+If we want genuinely smooth graphical curves, touch interaction anywhere on the face, higher frame rates and hardware-like animations, the next rendering layer should use Termux:GUI or a small native Android surface while keeping Termux as the engine.
