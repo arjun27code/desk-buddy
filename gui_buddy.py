@@ -25,6 +25,12 @@ VIRTUAL_H = 64.0
 FPS = 50.0
 FRAME_TIME = 1.0 / FPS
 
+# The uploaded OLED animation uses 64 ms frame holds. We keep the native
+# renderer smooth, but quantize a tiny expression/wobble layer to this cadence
+# to get the hand-animated pose-to-pose feel without copying its frames.
+HAND_ANIM_STEP = 0.064
+POSE_ENTRY_SECONDS = 1.20
+
 EMOTION_HOLD = 5.5
 DIZZY_HOLD = 6.0
 EMOTION_CYCLE = [
@@ -55,6 +61,17 @@ def clamp(value: float, low: float, high: float) -> float:
 def smoothstep(value: float) -> float:
     x = clamp(value, 0.0, 1.0)
     return x * x * (3.0 - 2.0 * x)
+
+
+def ease_out_back(value: float, overshoot: float = 1.70158) -> float:
+    x = clamp(value, 0.0, 1.0) - 1.0
+    return 1.0 + (overshoot + 1.0) * x * x * x + overshoot * x * x
+
+
+def stepped_time(value: float, step: float = HAND_ANIM_STEP) -> float:
+    if value <= 0.0:
+        return 0.0
+    return math.floor(value / step) * step
 
 
 def dim_color(
@@ -1168,6 +1185,225 @@ class RoboEyesFace:
         s.tilt_x += (s.tilt_target_x - s.tilt_x) * 0.10
         s.tilt_y += (s.tilt_target_y - s.tilt_y) * 0.10
 
+    def _hand_drawn_jitter(self, now: float) -> tuple[float, float, float]:
+        # A tiny deterministic wobble that changes only at the same cadence as
+        # the analysed bitmap sequence. It should feel hand-drawn, not shaky.
+        frame = int(now / HAND_ANIM_STEP)
+        mood_strength = 0.16 if self.state.mood_name == "idle" else 0.34
+
+        jx = math.sin(frame * 12.9898 + 1.7) * mood_strength
+        jy = math.sin(frame * 7.233 + 3.1) * mood_strength * 0.72
+        jr = math.sin(frame * 5.117 + 4.8) * mood_strength * 0.42
+        return jx, jy, jr
+
+    def _emotion_pose(
+        self,
+        now: float,
+    ) -> tuple[float, float, float, float, float]:
+        s = self.state
+
+        if s.mood_name == "idle" or s.mood_started <= 0.0:
+            return 0.0, 0.0, 1.0, 1.0, 0.0
+
+        age = max(0.0, now - s.mood_started)
+        if age >= POSE_ENTRY_SECONDS:
+            return 0.0, 0.0, 1.0, 1.0, 0.0
+
+        # Step only this secondary pose layer. The main geometry continues to
+        # interpolate smoothly at the native renderer frame rate.
+        stepped_age = stepped_time(age)
+        t = clamp(stepped_age / POSE_ENTRY_SECONDS, 0.0, 1.0)
+
+        # Short anticipation, then overshoot and settle.
+        anticipation = math.sin(
+            clamp(t / 0.17, 0.0, 1.0) * math.pi
+        )
+        spring = math.sin(t * math.pi * 3.2) * math.exp(-3.2 * t)
+        settle = ease_out_back(t)
+
+        dx = 0.0
+        dy = 0.0
+        sx = 1.0
+        sy = 1.0
+        gap = 0.0
+
+        if s.mood_name == "happy":
+            sx = 1.0 - 0.05 * spring
+            sy = 1.0 + 0.16 * spring
+            dy = -2.2 * abs(spring)
+            gap = -1.4 * spring
+
+        elif s.mood_name == "curious":
+            dx = 3.4 * spring
+            sx = 1.0 + 0.06 * abs(spring)
+            sy = 1.0 + 0.04 * spring
+            gap = 1.2 * spring
+
+        elif s.mood_name == "annoyed":
+            sx = 1.0 + 0.08 * abs(spring)
+            sy = 1.0 - 0.10 * abs(spring)
+            dx = 1.2 * spring
+
+        elif s.mood_name == "sad":
+            dy = 2.8 * smoothstep(t)
+            sy = 1.0 - 0.06 * smoothstep(t)
+            sx = 1.0 + 0.02 * smoothstep(t)
+
+        elif s.mood_name == "surprised":
+            if t < 0.18:
+                squeeze = anticipation
+                sx = 1.0 - 0.18 * squeeze
+                sy = 1.0 - 0.24 * squeeze
+            else:
+                pop = math.sin((t - 0.18) * math.pi * 2.3) * math.exp(
+                    -2.4 * (t - 0.18)
+                )
+                sx = 1.0 + 0.13 * pop
+                sy = 1.0 + 0.24 * pop
+                gap = 2.2 * pop
+
+        elif s.mood_name == "sleepy":
+            dy = 1.8 * smoothstep(t)
+            sy = 1.0 - 0.11 * smoothstep(t)
+            sx = 1.0 + 0.04 * smoothstep(t)
+
+        elif s.mood_name == "love":
+            pulse = math.sin(t * math.pi * 2.5) * math.exp(-2.2 * t)
+            sx = 1.0 + 0.10 * pulse
+            sy = 1.0 + 0.10 * pulse
+            gap = 1.5 * pulse
+
+        elif s.mood_name == "excited":
+            sx = 1.0 - 0.08 * spring
+            sy = 1.0 + 0.20 * spring
+            dy = -3.0 * abs(spring)
+            gap = -1.8 * spring
+
+        elif s.mood_name == "dizzy":
+            dx = math.sin(stepped_age * 15.0) * 1.8 * (1.0 - t)
+            dy = math.cos(stepped_age * 12.0) * 1.3 * (1.0 - t)
+
+        # A tiny anticipatory compression makes the pose feel authored instead
+        # of simply tweened. Fade it quickly so it does not distort the hold.
+        if t < 0.17 and s.mood_name not in {"sad", "sleepy"}:
+            sx *= 1.0 + 0.025 * anticipation
+            sy *= 1.0 - 0.055 * anticipation
+
+        _ = settle
+        return dx, dy, sx, sy, gap
+
+    def _draw_motion_accents(
+        self,
+        oled: VirtualOLED,
+        now: float,
+        lx: float,
+        ly: float,
+        lw: float,
+        lh: float,
+        rx: float,
+        ry: float,
+        rw: float,
+        rh: float,
+    ) -> None:
+        s = self.state
+        if s.mood_name == "idle" or s.mood_started <= 0.0:
+            return
+
+        age = max(0.0, now - s.mood_started)
+        if age > 1.35:
+            return
+
+        p = 1.0 - smoothstep(age / 1.35)
+        if p <= 0.01:
+            return
+
+        stepped = stepped_time(age)
+        wobble = math.sin(stepped * 18.0) * 0.9
+        color = dim_color(CYAN, 0.30 + 0.62 * p)
+
+        if s.mood_name in {"happy", "excited"}:
+            for x in (lx, rx + rw):
+                direction = -1.0 if x < 64 else 1.0
+                oled.line(
+                    x + direction * 2.0,
+                    min(ly, ry) - 5.0 + wobble,
+                    x + direction * 8.0,
+                    min(ly, ry) - 10.0 + wobble,
+                    color,
+                    0.75,
+                )
+                oled.line(
+                    x + direction * 3.0,
+                    min(ly, ry) + 2.0,
+                    x + direction * 10.0,
+                    min(ly, ry) - 1.0,
+                    color,
+                    0.65,
+                )
+
+        elif s.mood_name == "curious":
+            edge_x = max(rx + rw, lx + lw)
+            oled.line(edge_x + 2, ry - 3, edge_x + 8, ry - 7, color, 0.7)
+            oled.line(edge_x + 3, ry + 2, edge_x + 10, ry + 1, color, 0.7)
+            oled.line(edge_x + 1, ry + 7, edge_x + 7, ry + 10, color, 0.7)
+
+        elif s.mood_name == "annoyed":
+            for side_x, direction in ((lx - 2, -1), (rx + rw + 2, 1)):
+                oled.line(
+                    side_x,
+                    ly + 2 + wobble,
+                    side_x + direction * 7,
+                    ly - 3 + wobble,
+                    dim_color(RED, 0.55 + 0.35 * p),
+                    0.8,
+                )
+                oled.line(
+                    side_x,
+                    ly + 8 - wobble,
+                    side_x + direction * 9,
+                    ly + 6 - wobble,
+                    dim_color(RED, 0.55 + 0.35 * p),
+                    0.8,
+                )
+
+        elif s.mood_name == "sad":
+            tear_color = dim_color(BLUE, 0.60 + 0.25 * p)
+            oled.line(
+                lx + lw * 0.72,
+                ly + lh + 2,
+                lx + lw * 0.72 - 1.0,
+                ly + lh + 8 + wobble,
+                tear_color,
+                0.75,
+            )
+            oled.line(
+                rx + rw * 0.28,
+                ry + rh + 2,
+                rx + rw * 0.28 + 1.0,
+                ry + rh + 7 - wobble,
+                tear_color,
+                0.75,
+            )
+
+        elif s.mood_name == "surprised":
+            for side_x, direction in ((lx - 2, -1), (rx + rw + 2, 1)):
+                oled.line(
+                    side_x,
+                    ly + lh * 0.20,
+                    side_x + direction * 9,
+                    ly + lh * 0.10,
+                    dim_color(WHITE, 0.50 + 0.35 * p),
+                    0.75,
+                )
+                oled.line(
+                    side_x,
+                    ly + lh * 0.65,
+                    side_x + direction * 10,
+                    ly + lh * 0.72,
+                    dim_color(WHITE, 0.50 + 0.35 * p),
+                    0.75,
+                )
+
     def _draw_heart_eye(
         self,
         oled: VirtualOLED,
@@ -1208,6 +1444,38 @@ class RoboEyesFace:
         rx = s.eye_r_x
         ry = s.eye_r_y
 
+        lw = s.eye_l_w
+        lh = s.eye_l_h
+        rw = s.eye_r_w
+        rh = s.eye_r_h
+        radius_l = s.radius_l
+        radius_r = s.radius_r
+
+        pose_dx, pose_dy, pose_sx, pose_sy, pose_gap = self._emotion_pose(now)
+
+        left_cx = lx + lw / 2.0
+        left_cy = ly + lh / 2.0
+        right_cx = rx + rw / 2.0
+        right_cy = ry + rh / 2.0
+
+        lw *= pose_sx
+        lh *= pose_sy
+        rw *= pose_sx
+        rh *= pose_sy
+
+        lx = left_cx - lw / 2.0 + pose_dx - pose_gap / 2.0
+        ly = left_cy - lh / 2.0 + pose_dy
+        rx = right_cx - rw / 2.0 + pose_dx + pose_gap / 2.0
+        ry = right_cy - rh / 2.0 + pose_dy
+
+        hand_x, hand_y, hand_radius = self._hand_drawn_jitter(now)
+        lx += hand_x
+        rx -= hand_x * 0.35
+        ly += hand_y
+        ry -= hand_y * 0.30
+        radius_l = max(1.0, radius_l + hand_radius)
+        radius_r = max(1.0, radius_r - hand_radius * 0.45)
+
         tilt_shift_x = s.tilt_x * 4.0
         tilt_shift_y = s.tilt_y * 2.5
         roll = s.tilt_x * 3.0
@@ -1238,17 +1506,30 @@ class RoboEyesFace:
             ly += opposite
             ry -= opposite
 
+        self._draw_motion_accents(
+            oled,
+            now,
+            lx,
+            ly,
+            lw,
+            lh,
+            rx,
+            ry,
+            rw,
+            rh,
+        )
+
         if s.mood_name == "love":
             self._draw_heart_eye(
                 oled,
-                lx + s.eye_l_w / 2.0,
-                ly + s.eye_l_h / 2.0,
+                lx + lw / 2.0,
+                ly + lh / 2.0,
                 12.5,
             )
             self._draw_heart_eye(
                 oled,
-                rx + s.eye_r_w / 2.0,
-                ry + s.eye_r_h / 2.0,
+                rx + rw / 2.0,
+                ry + rh / 2.0,
                 12.5,
             )
             return
@@ -1256,17 +1537,17 @@ class RoboEyesFace:
         oled.rounded_rect(
             lx,
             ly,
-            s.eye_l_w,
-            s.eye_l_h,
-            s.radius_l,
+            lw,
+            lh,
+            radius_l,
             CYAN,
         )
         oled.rounded_rect(
             rx,
             ry,
-            s.eye_r_w,
-            s.eye_r_h,
-            s.radius_r,
+            rw,
+            rh,
+            radius_r,
             CYAN,
         )
 
@@ -1274,16 +1555,16 @@ class RoboEyesFace:
             oled.polygon(
                 [
                     (lx, ly - 1),
-                    (lx + s.eye_l_w, ly - 1),
-                    (lx, ly + s.eyelid_tired - 1),
+                    (lx + lw, ly - 1),
+                    (lx, ly + min(lh / 2.0, s.eyelid_tired) - 1),
                 ],
                 BLACK,
             )
             oled.polygon(
                 [
                     (rx, ry - 1),
-                    (rx + s.eye_r_w, ry - 1),
-                    (rx + s.eye_r_w, ry + s.eyelid_tired - 1),
+                    (rx + rw, ry - 1),
+                    (rx + rw, ry + min(rh / 2.0, s.eyelid_tired) - 1),
                 ],
                 BLACK,
             )
@@ -1292,16 +1573,16 @@ class RoboEyesFace:
             oled.polygon(
                 [
                     (lx, ly - 1),
-                    (lx + s.eye_l_w, ly - 1),
-                    (lx + s.eye_l_w, ly + s.eyelid_angry - 1),
+                    (lx + lw, ly - 1),
+                    (lx + lw, ly + min(lh / 2.0, s.eyelid_angry) - 1),
                 ],
                 BLACK,
             )
             oled.polygon(
                 [
                     (rx, ry - 1),
-                    (rx + s.eye_r_w, ry - 1),
-                    (rx, ry + s.eyelid_angry - 1),
+                    (rx + rw, ry - 1),
+                    (rx, ry + min(rh / 2.0, s.eyelid_angry) - 1),
                 ],
                 BLACK,
             )
@@ -1309,18 +1590,18 @@ class RoboEyesFace:
         if s.happy_bottom > 0.05:
             oled.rounded_rect(
                 lx - 1,
-                (ly + s.eye_l_h) - s.happy_bottom + 1,
-                s.eye_l_w + 2,
+                (ly + lh) - min(lh / 2.0, s.happy_bottom) + 1,
+                lw + 2,
                 s.eye_l_h_default,
-                s.radius_l,
+                radius_l,
                 BLACK,
             )
             oled.rounded_rect(
                 rx - 1,
-                (ry + s.eye_r_h) - s.happy_bottom + 1,
-                s.eye_r_w + 2,
+                (ry + rh) - min(rh / 2.0, s.happy_bottom) + 1,
+                rw + 2,
                 s.eye_r_h_default,
-                s.radius_r,
+                radius_r,
                 BLACK,
             )
 
@@ -1328,8 +1609,8 @@ class RoboEyesFace:
             elapsed = now - s.dizzy_started
 
             for cx, cy in [
-                (lx + s.eye_l_w / 2.0, ly + s.eye_l_h / 2.0),
-                (rx + s.eye_r_w / 2.0, ry + s.eye_r_h / 2.0),
+                (lx + lw / 2.0, ly + lh / 2.0),
+                (rx + rw / 2.0, ry + rh / 2.0),
             ]:
                 angle = elapsed * 5.5
                 oled.circle(
