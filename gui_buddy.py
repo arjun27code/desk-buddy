@@ -1491,18 +1491,19 @@ class RoboEyesFace:
             self.go_to_sleep()
             return
 
+        if s.tap_pending and now >= s.tap_pending_until:
+            s.tap_pending = False
+            s.tap_pending_until = 0.0
+            self.cycle_emotion()
+
         self.scenes.update(
             now,
             allow_random=(
                 s.mood_name == "idle"
                 and s.manual_until == 0.0
-                and not s.camera_present
             ),
             sleeping=False,
         )
-
-        if s.camera_present and now - s.camera_last_seen > 2.8:
-            s.camera_present = False
 
         if s.mood_name == "idle" and self.scenes.current:
             if self.scenes.current in {"bike", "car"}:
@@ -1526,39 +1527,8 @@ class RoboEyesFace:
                 s.idle = False
                 s.curious = True
 
-        camera_can_drive_gaze = (
-            s.camera_present
-            and s.mood_name == "idle"
-            and not self.scenes.current
-            and s.wave_until <= now
-            and s.manual_until == 0.0
-        )
-
-        if camera_can_drive_gaze:
-            max_x = self._constraint_x()
-            max_y = self._constraint_y()
-
-            # Mirrored front-camera coordinates feel like eye contact rather
-            # than CCTV: person on screen-left makes Buddy look screen-left.
-            nx = clamp(
-                (s.camera_x + 1.0) / 2.0,
-                0.0,
-                1.0,
-            )
-            ny = clamp(
-                (s.camera_y + 1.0) / 2.0,
-                0.0,
-                1.0,
-            )
-
-            s.eye_l_x_next = nx * max_x
-            s.eye_l_y_next = ny * max_y
-            s.idle = False
-            s.curious = True
-
-        elif (
-            not s.camera_present
-            and s.mood_name == "idle"
+        if (
+            s.mood_name == "idle"
             and not self.scenes.current
             and s.wave_until <= now
             and s.manual_until == 0.0
@@ -1602,7 +1572,6 @@ class RoboEyesFace:
 
         if (
             s.idle
-            and not camera_can_drive_gaze
             and s.manual_until == 0.0
             and now >= s.next_idle
         ):
