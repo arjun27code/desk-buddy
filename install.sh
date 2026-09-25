@@ -28,6 +28,9 @@ echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/oled_asset_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
+echo "Running Game Hub logic self-test..."
+"$PYTHON_BIN" "$PROJECT_DIR/game_hub.py" --self-test
+
 echo "Installing Termux:GUI Python binding..."
 "$PYTHON_BIN" -m pip install --upgrade termuxgui
 
