@@ -2105,6 +2105,11 @@ class RoboEyesFace:
             sleeping=s.sleeping,
         )
 
+        if s.sleeping:
+            # Sleep is a full scene now: bed, sleeping mini Buddy, moon and Zs.
+            # Drawing the large RoboEyes over it would rather defeat the point.
+            return
+
         self.effects.update_and_draw(
             oled,
             s.mood_name,
@@ -2545,6 +2550,7 @@ def event_worker(
 
 def main() -> int:
     sensor_feed = None
+    camera_vision = None
 
     try:
         with tg.Connection() as connection:
@@ -2602,7 +2608,13 @@ def main() -> int:
             image.setbuffer(buffer)
 
             face = RoboEyesFace()
-            face.voice.say("Desk Buddy online.", force=True)
+            doodle_show = DoodleShow()
+            camera_vision = CameraVision(interval=1.05)
+
+            face.voice.say(
+                "Desk Buddy online.",
+                force=True,
+            )
             stop = threading.Event()
 
             with buffer as mem:
@@ -2619,6 +2631,8 @@ def main() -> int:
                 sensor_feed = SensorFeed(face)
                 sensor_feed.start()
 
+                camera_vision.start()
+
                 next_frame = time.monotonic()
                 last_caption = None
                 last_clock = None
@@ -2626,8 +2640,39 @@ def main() -> int:
                 while not stop.is_set():
                     now = time.monotonic()
 
+                    vision = camera_vision.snapshot()
+
+                    five_fingers = camera_vision.consume_five_fingers()
+                    boredom = camera_vision.consume_boredom()
+
                     with face.lock:
-                        face.draw(canvas, oled, now)
+                        face.set_camera_attention(
+                            vision.face_present,
+                            vision.face_x,
+                            vision.face_y,
+                        )
+
+                        if boredom and not doodle_show.active:
+                            face.camera_bored_reaction()
+
+                        if five_fingers:
+                            if face.state.sleeping:
+                                face.wake_up()
+                            doodle_show.start()
+                            face.voice.say(
+                                "Five fingers detected. Show time.",
+                                force=True,
+                            )
+
+                        if doodle_show.active:
+                            if not doodle_show.draw(canvas, now):
+                                face.set_emotion(
+                                    "happy",
+                                    3.5,
+                                )
+                                face.draw(canvas, oled, now)
+                        else:
+                            face.draw(canvas, oled, now)
 
                     buffer.blit()
                     image.refresh()
@@ -2660,6 +2705,9 @@ def main() -> int:
         return 3
 
     finally:
+        if camera_vision is not None:
+            camera_vision.stop()
+
         if sensor_feed is not None:
             sensor_feed.stop()
 
