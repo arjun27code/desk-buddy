@@ -25,6 +25,7 @@ class OledAssetShow:
         self.active = False
         self.started = 0.0
         self.frames: list[bytes] = []
+        self.frame_runs: list[list[tuple[int, int, int]]] = []
         self.frame_seconds = DEFAULT_FRAME_SECONDS
         self.total_frames = DEFAULT_TOTAL_FRAMES
         self.source_path: Path | None = None
@@ -92,6 +93,7 @@ class OledAssetShow:
 
         self.loaded = True
         self.frames = []
+        self.frame_runs = []
         self.load_error = ""
 
         header_path = self._find_readable(
@@ -167,6 +169,10 @@ class OledAssetShow:
             return False
 
         self.frames = frames
+        self.frame_runs = [
+            self._build_runs(frame)
+            for frame in frames
+        ]
         self.total_frames = len(frames)
         self.source_path = header_path
 
@@ -207,6 +213,54 @@ class OledAssetShow:
 
         return True
 
+    @staticmethod
+    def _build_runs(
+        frame: bytes,
+    ) -> list[tuple[int, int, int]]:
+        """Convert one 128x64 bitmap into horizontal lit-pixel runs once."""
+
+        runs: list[tuple[int, int, int]] = []
+
+        for source_y in range(64):
+            row_offset = source_y * 16
+            run_start: int | None = None
+
+            for source_x in range(128):
+                byte = frame[
+                    row_offset
+                    + source_x // 8
+                ]
+                mask = 0x80 >> (
+                    source_x % 8
+                )
+                lit = bool(byte & mask)
+
+                if lit and run_start is None:
+                    run_start = source_x
+
+                if (
+                    run_start is not None
+                    and (
+                        not lit
+                        or source_x == 127
+                    )
+                ):
+                    run_end = (
+                        source_x + 1
+                        if lit and source_x == 127
+                        else source_x
+                    )
+                    runs.append(
+                        (
+                            source_y,
+                            run_start,
+                            run_end,
+                        )
+                    )
+                    run_start = None
+
+        return runs
+
     def start(self) -> bool:
         if not self.ensure_loaded():
             return False
@@ -237,8 +291,6 @@ class OledAssetShow:
             self.active = False
             return False
 
-        frame = self.frames[frame_index]
-
         canvas.clear()
 
         scale = min(
@@ -252,48 +304,22 @@ class OledAssetShow:
         origin_x = (canvas.width - panel_w) / 2.0
         origin_y = (canvas.height - panel_h) / 2.0
 
-        # Original Arduino drawBitmap semantics: 1 bits are lit pixels.
-        # We preserve the exact 128x64 bitmap geometry and pointer order.
-        for source_y in range(64):
-            row_offset = source_y * 16
-            run_start: int | None = None
+        # Bitmap scanning is precomputed at load time. Runtime only draws the
+        # lit horizontal runs, which matters on a phone CPU during 64 ms frame
+        # playback.
+        runs = self.frame_runs[frame_index]
 
-            for source_x in range(128):
-                byte = frame[
-                    row_offset
-                    + source_x // 8
-                ]
-                mask = 0x80 >> (source_x % 8)
-                lit = bool(byte & mask)
-
-                if lit and run_start is None:
-                    run_start = source_x
-
-                if (
-                    run_start is not None
-                    and (
-                        not lit
-                        or source_x == 127
-                    )
-                ):
-                    run_end = (
-                        source_x + 1
-                        if lit and source_x == 127
-                        else source_x
-                    )
-
-                    canvas.rect(
-                        origin_x + run_start * scale,
-                        origin_y + source_y * scale,
-                        max(
-                            1.0,
-                            (run_end - run_start) * scale,
-                        ),
-                        max(1.0, scale),
-                        WHITE,
-                    )
-
-                    run_start = None
+        for source_y, run_start, run_end in runs:
+            canvas.rect(
+                origin_x + run_start * scale,
+                origin_y + source_y * scale,
+                max(
+                    1.0,
+                    (run_end - run_start) * scale,
+                ),
+                max(1.0, scale),
+                WHITE,
+            )
 
         return True
 
