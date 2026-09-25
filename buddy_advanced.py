@@ -708,6 +708,237 @@ class SceneEngine:
                     dim_color(color, 0.24 + 0.04 * math.sin(now + index)),
                 )
 
+    def _draw_sunny(self, canvas, now: float) -> None:
+        self._gradient(
+            canvas,
+            (5, 30, 48, 255),
+            (0, 7, 18, 255),
+        )
+
+        sun_x = canvas.width * 0.78
+        sun_y = canvas.height * 0.18
+        sun_r = canvas.width * 0.090
+
+        for ring in range(4, 0, -1):
+            canvas.circle(
+                sun_x,
+                sun_y,
+                sun_r * (1.0 + ring * 0.28),
+                dim_color(YELLOW, 0.018 * ring),
+            )
+
+        canvas.circle(
+            sun_x,
+            sun_y,
+            sun_r,
+            dim_color(YELLOW, 0.72),
+        )
+
+        for index in range(12):
+            angle = now * 0.08 + math.tau * index / 12.0
+            inner = sun_r * 1.35
+            outer = sun_r * (1.75 + 0.08 * math.sin(now * 1.2 + index))
+            canvas.line(
+                sun_x + math.cos(angle) * inner,
+                sun_y + math.sin(angle) * inner,
+                sun_x + math.cos(angle) * outer,
+                sun_y + math.sin(angle) * outer,
+                dim_color(YELLOW, 0.28),
+                2,
+            )
+
+        cloud_phase = (now * 11.0) % (canvas.width + 180)
+        self._cloud(
+            canvas,
+            canvas.width + 80 - cloud_phase,
+            canvas.height * 0.28,
+            canvas.width * 0.19,
+            0.18,
+        )
+        self._cloud(
+            canvas,
+            (canvas.width * 0.22 - cloud_phase * 0.45) % (canvas.width + 160) - 80,
+            canvas.height * 0.38,
+            canvas.width * 0.15,
+            0.11,
+        )
+
+        # Warm horizon.
+        ground = canvas.height * 0.78
+        canvas.rect(
+            0,
+            ground,
+            canvas.width,
+            canvas.height - ground,
+            dim_color(GREEN, 0.10),
+        )
+
+    def _draw_night(self, canvas, now: float) -> None:
+        self._gradient(
+            canvas,
+            (3, 5, 22, 255),
+            (0, 0, 6, 255),
+        )
+        self._draw_stars(canvas, now, 42)
+
+        moon_x = canvas.width * 0.77
+        moon_y = canvas.height * 0.16
+        moon_r = canvas.width * 0.082
+        canvas.circle(
+            moon_x,
+            moon_y,
+            moon_r * 1.35,
+            dim_color(BLUE, 0.07),
+        )
+        canvas.circle(
+            moon_x,
+            moon_y,
+            moon_r,
+            dim_color(WHITE, 0.72),
+        )
+        canvas.circle(
+            moon_x + moon_r * 0.42,
+            moon_y - moon_r * 0.16,
+            moon_r * 0.92,
+            (3, 5, 22, 255),
+        )
+
+        # Slow shooting star.
+        phase = (now * 0.085) % 1.0
+        sx = canvas.width * (0.05 + 0.72 * phase)
+        sy = canvas.height * (0.23 + 0.10 * phase)
+        canvas.line(
+            sx - 55,
+            sy - 24,
+            sx,
+            sy,
+            dim_color(WHITE, 0.30),
+            2,
+        )
+
+    def _draw_peek(self, canvas, now: float) -> None:
+        # The face itself moves to the same edge in gui_buddy.py. This layer
+        # adds a screen-edge lip and tiny gripping fingers.
+        side = 1 if self.peek_side > 0 else -1
+        x = canvas.width - 9 if side > 0 else 9
+
+        canvas.rect(
+            canvas.width - 13 if side > 0 else 0,
+            0,
+            13,
+            canvas.height,
+            dim_color(CYAN, 0.08),
+        )
+        canvas.line(
+            x,
+            0,
+            x,
+            canvas.height,
+            dim_color(CYAN, 0.35),
+            2,
+        )
+
+        base_y = canvas.height * 0.62
+        wave = math.sin(now * 5.5) * 4.0
+
+        for index in range(3):
+            finger_y = base_y + index * 22
+            canvas.line(
+                x,
+                finger_y,
+                x - side * (18 + index * 3 + wave * 0.15),
+                finger_y - 7,
+                dim_color(CYAN, 0.48),
+                4,
+            )
+            canvas.circle(
+                x - side * (19 + index * 3 + wave * 0.15),
+                finger_y - 7,
+                3,
+                dim_color(CYAN, 0.60),
+            )
+
+        # Little curiosity dots outside the apparent screen edge.
+        for index in range(4):
+            dot_x = x - side * (38 + index * 15)
+            dot_y = canvas.height * 0.31 + math.sin(now * 2.0 + index) * 9
+            canvas.circle(
+                dot_x,
+                dot_y,
+                2 + index % 2,
+                dim_color(CYAN, 0.16 + 0.05 * index),
+            )
+
+    def _draw_rain_atmosphere(
+        self,
+        canvas,
+        now: float,
+        dt: float,
+        eye_color,
+    ) -> None:
+        age = max(0.0, now - self.started)
+
+        self._gradient(
+            canvas,
+            (5, 10, 18, 255),
+            (0, 1, 5, 255),
+        )
+
+        # Clouds arrive first. Rain starts after the buildup rather than
+        # appearing from a black void.
+        cloud_progress = min(1.0, age / 1.8)
+        for index in range(5):
+            target_x = canvas.width * (0.03 + index * 0.22)
+            start_x = -canvas.width * (0.50 + index * 0.10)
+            x = start_x + (target_x - start_x) * cloud_progress
+            self._cloud(
+                canvas,
+                x,
+                canvas.height * (0.12 + (index % 2) * 0.065),
+                canvas.width * (0.23 + (index % 3) * 0.025),
+                0.22,
+            )
+
+        if age >= 1.65:
+            self.draw_fullscreen_rain(
+                canvas,
+                dt,
+                eye_color,
+            )
+
+        if now >= self.next_lightning:
+            self.lightning_until = now + random.uniform(0.10, 0.18)
+            self.next_lightning = now + random.uniform(2.8, 6.8)
+
+        if now < self.lightning_until:
+            # Brief whole-screen flash and one branching bolt.
+            canvas.rect(
+                0,
+                0,
+                canvas.width,
+                canvas.height,
+                dim_color(WHITE, 0.10),
+            )
+
+            x = canvas.width * random.uniform(0.20, 0.82)
+            y = canvas.height * 0.18
+            segments = [
+                (x, y),
+                (x - 18, y + 65),
+                (x + 3, y + 110),
+                (x - 24, y + 175),
+                (x - 10, y + 240),
+            ]
+            for start, end in zip(segments, segments[1:]):
+                canvas.line(
+                    start[0],
+                    start[1],
+                    end[0],
+                    end[1],
+                    dim_color(WHITE, 0.88),
+                    3,
+                )
+
     def _rain_profile(self):
         return {
             "slow": (55, 260.0, 390.0, 0.32),
