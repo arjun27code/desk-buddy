@@ -399,3 +399,35 @@ The mirrored front camera is also rendered as a small preview in the top-right c
 - camera frame is alpha-blended directly into the Desk Buddy render buffer
 - the clock has moved to top-center so it does not overlap the preview
 - `CAM● RH5` appears when a stable right-hand five-finger pose is currently detected
+
+
+## Performance and right-hand reliability update
+
+The native renderer is now tuned for phone hardware rather than trying to brute-force a desktop-style refresh loop:
+
+- render cadence reduced from 50 FPS to 30 FPS
+- render buffer reduced from up to 400x920 to about 320x720
+- camera analysis width reduced from 480px to 360px
+- camera uses a normal low-rate scan and automatically enters a faster burst when a possible right-hand palm appears
+- camera preview stays at 40% alpha
+- OLED bitmap rows are precomputed once at load time instead of rescanning all 8192 source pixels every displayed frame
+
+The open-palm detector was also changed:
+
+- smaller morphology kernel preserves gaps between fingers
+- broader YCrCb + HSV skin masks improve lighting tolerance
+- smaller distant hands are accepted
+- three strong finger valleys can promote an open-palm result
+- a stricter two-valley fallback handles merged fingers in low-light snapshots
+- only a candidate on the user's mirrored right-hand side can fire the right-hand OLED trigger
+- the HUD shows `CAM RH4?` while a likely palm is being confirmed and `CAM● RH5` when it is confirmed
+
+### Isolate OLED playback from camera detection
+
+Run:
+
+    desk-buddy --test-oled
+
+This starts the local OLED frame file immediately. If the animation plays in this mode but not from the hand gesture, the frame loader is healthy and only vision calibration needs attention.
+
+The terminal also prints the detected right-hand confidence and the OLED file/frame count when a gesture fires.
