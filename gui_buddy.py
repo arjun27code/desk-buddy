@@ -2593,6 +2593,15 @@ def main() -> int:
             time_view.setmargin(24, "right")
             time_view.setclickable(False)
 
+            status_view = tg.TextView(activity, "", parent=root)
+            status_view.setdimensions(tg.View.MATCH_PARENT, tg.View.MATCH_PARENT)
+            status_view.settextcolor(0xFF7CEFF3)
+            status_view.settextsize(13)
+            status_view.setgravity(0, 0)
+            status_view.setmargin(22, "top")
+            status_view.setmargin(20, "left")
+            status_view.setclickable(False)
+
             dims = [0, 0]
             for _ in range(200):
                 dims = image.getdimensions()
@@ -2603,7 +2612,44 @@ def main() -> int:
             if not dims or dims[0] <= 0 or dims[1] <= 0:
                 dims = [1080, 2400]
 
-            buffer_w, buffer_h = choose_buffer_size(int(dims[0]), int(dims[1]))
+            screen_w = int(dims[0])
+            screen_h = int(dims[1])
+
+            # Modern glass-like overlays. The animation owns the whole screen;
+            # UI only occupies small floating chips rather than giant text
+            # layers stretched across the activity.
+            caption_h = max(78, min(116, int(screen_h * 0.075)))
+            caption_w = max(280, screen_w - 48)
+            caption_view.setabsoluteposition(True)
+            caption_view.setdimensions(caption_w, caption_h)
+            caption_view.setposition(
+                24,
+                max(12, screen_h - caption_h - 42),
+            )
+            caption_view.setgravity(1, 1)
+            caption_view.setpadding(18, 10, 18, 10)
+            caption_view.setbackgroundcolor(0xB0101A22)
+
+            time_view.setabsoluteposition(True)
+            time_view.setdimensions(118, 50)
+            time_view.setposition(
+                max(12, screen_w - 138),
+                18,
+            )
+            time_view.setgravity(1, 1)
+            time_view.setbackgroundcolor(0x70101920)
+
+            status_view.setabsoluteposition(True)
+            status_view.setdimensions(
+                min(230, max(150, screen_w // 2)),
+                50,
+            )
+            status_view.setposition(18, 18)
+            status_view.setgravity(0, 1)
+            status_view.setpadding(12, 0, 8, 0)
+            status_view.setbackgroundcolor(0x50101920)
+
+            buffer_w, buffer_h = choose_buffer_size(screen_w, screen_h)
             buffer = tg.Buffer(connection, buffer_w, buffer_h)
             image.setbuffer(buffer)
 
@@ -2636,6 +2682,7 @@ def main() -> int:
                 next_frame = time.monotonic()
                 last_caption = None
                 last_clock = None
+                last_status = None
 
                 while not stop.is_set():
                     now = time.monotonic()
@@ -2686,6 +2733,26 @@ def main() -> int:
                     if clock != last_clock:
                         time_view.settext(clock)
                         last_clock = clock
+
+                    with face.lock:
+                        if face.state.sleeping:
+                            mode_label = "SLEEP"
+                        elif doodle_show.active:
+                            mode_label = "DOODLE"
+                        elif face.scenes.current:
+                            mode_label = face.scenes.current.upper()
+                        else:
+                            mode_label = face.state.mood_name.upper()
+
+                    if vision.available:
+                        camera_label = "CAM●" if vision.face_present else "CAM"
+                    else:
+                        camera_label = "CAM OFF"
+
+                    status = f"{camera_label}   {mode_label}"
+                    if status != last_status:
+                        status_view.settext(status)
+                        last_status = status
 
                     next_frame += FRAME_TIME
                     delay = next_frame - time.monotonic()
