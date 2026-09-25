@@ -22,8 +22,6 @@ fi
 echo "Checking Desk Buddy..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
-chmod +x "$PROJECT_DIR/start.sh"
-
 LAUNCHER="$PREFIX/bin/desk-buddy"
 
 cat > "$LAUNCHER" <<EOF
@@ -36,7 +34,7 @@ chmod +x "$LAUNCHER"
 
 echo
 echo "Desk Buddy installed."
-echo "No browser. No localhost. It runs directly on the Termux screen."
+echo "Direct Termux display. No browser and no localhost."
 echo
 echo "Start:"
 echo "  desk-buddy"
