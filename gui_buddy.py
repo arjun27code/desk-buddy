@@ -2192,10 +2192,8 @@ class SensorFeed:
         self.process: subprocess.Popen[str] | None = None
         self.thread: threading.Thread | None = None
 
-        self.baseline_samples: list[tuple[float, float, float]] = []
-        self.baseline: tuple[float, float, float] | None = None
-        self.previous_accel: tuple[float, float, float] | None = None
-        self.last_shake = 0.0
+        self.fusion = SensorFusion()
+        self.sensor_request = discover_sensor_request()
 
     def available(self) -> bool:
         return shutil.which("termux-sensor") is not None
@@ -2278,60 +2276,25 @@ class SensorFeed:
             return
 
         now = time.monotonic()
+        tilt_x, tilt_y, shake = self.fusion.update(
+            accel=accel,
+            gyro=gyro,
+            now=now,
+        )
 
-        if accel is not None:
-            ax, ay, az = accel
-
-            if self.baseline is None:
-                self.baseline_samples.append(accel)
-
-                if len(self.baseline_samples) >= 15:
-                    count = float(len(self.baseline_samples))
-                    self.baseline = (
-                        sum(v[0] for v in self.baseline_samples) / count,
-                        sum(v[1] for v in self.baseline_samples) / count,
-                        sum(v[2] for v in self.baseline_samples) / count,
-                    )
-            else:
-                bx, _by, bz = self.baseline
-
-                tilt_x = clamp((ax - bx) / 5.5, -1.0, 1.0)
-                tilt_y = clamp((az - bz) / 5.5, -1.0, 1.0)
-
-                with self.face.lock:
-                    self.face.set_sensor_tilt(tilt_x, tilt_y)
-
-            if self.previous_accel is not None:
-                px, py, pz = self.previous_accel
-                accel_delta = math.sqrt(
-                    (ax - px) ** 2
-                    + (ay - py) ** 2
-                    + (az - pz) ** 2
-                )
-
-                if accel_delta >= 6.2 and now - self.last_shake >= 2.0:
-                    with self.face.lock:
-                        self.face.trigger_dizzy()
-                    self.last_shake = now
-
-            self.previous_accel = accel
-
-        if gyro is not None:
-            gx, gy, gz = gyro
-            gyro_speed = math.sqrt(gx * gx + gy * gy + gz * gz)
-
-            if gyro_speed >= 5.2 and now - self.last_shake >= 2.0:
-                with self.face.lock:
-                    self.face.trigger_dizzy()
-                self.last_shake = now
+        with self.face.lock:
+            self.face.set_sensor_tilt(tilt_x, tilt_y)
+            if shake:
+                self.face.handle_shake()
 
     def _run(self) -> None:
+        request = self.sensor_request or "Accelerometer,Gyroscope"
         command = [
             "termux-sensor",
             "-s",
-            "accelerometer,gyroscope",
+            request,
             "-d",
-            "70",
+            "50",
         ]
 
         try:
