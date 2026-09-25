@@ -1,118 +1,111 @@
 # Desk Buddy
 
-Phone-first smart Desk Buddy built to run locally on Android through Termux.
+A phone-first Desk Buddy that runs directly inside Termux.
 
-## MVP features
+This is not a website and does not use localhost or a browser. The phone screen itself becomes the Desk Buddy display.
 
-- Cute animated face with blinking eyes
-- Eyes follow pointer and touch movement
-- Tap and button reactions
-- Curious, excited, sleepy, surprised, love and focused moods
-- Local time and date
-- Local weather through browser location and Open-Meteo
-- Optional phone battery status through Termux:API
-- Browser speech for simple voice reactions
-- Full-screen face mode
-- No Python framework or third-party Python packages
-- One-command launch after installation: desk-buddy
+## Current behavior
 
-## How it works
+- Full-screen terminal face
+- Cyan animated eyes
+- Random blinking
+- Eyes look around automatically
+- Happy, sleepy, surprised and focused expressions
+- Cute idle messages
+- Time and date
+- Optional battery reactions
+- Optional weather reactions
+- Charging and low-battery reactions
+- Night-time sleepy behavior
+- One command launch: `desk-buddy`
 
-Termux runs one small Python HTTP server on the phone. The server hosts the HTML, CSS and JavaScript interface on localhost and provides tiny endpoints for weather and optional battery data.
+## Controls
 
-There is no Docker, database or cloud backend in the MVP. A blinking pair of eyes does not need enterprise infrastructure, despite the software industry's best efforts.
+While Desk Buddy is running:
 
-## Install on Termux
+- `B` = boop
+- `SPACE` = random reaction
+- `S` = sleep reaction
+- `W` = refresh weather
+- `Q` = quit
 
-Install Git and Python:
+## Install
 
     pkg update
-    pkg install git python
+    pkg install git python gh
 
-Clone the repository:
+Clone the private repository using GitHub CLI:
 
-    git clone https://github.com/arjun27code/desk-buddy.git
+    gh repo clone arjun27code/desk-buddy
     cd desk-buddy
 
-While the MVP is on its review branch, switch to it:
-
-    git switch desk-buddy-mvp
-
-Run the installer once:
+Install the launcher:
 
     bash install.sh
 
-After that, start Desk Buddy from any Termux directory with:
+After that you can run it from anywhere:
 
     desk-buddy
 
-Desk Buddy starts its local server and opens:
+## Updating an existing clone
 
-    http://127.0.0.1:8765
+If you already cloned the repository:
 
-Press Ctrl+C in Termux to stop it.
+    cd ~/desk-buddy
+    git pull origin main
+    bash install.sh
 
-## Optional battery support
+Then run:
 
-The rest of Desk Buddy works without Termux:API.
-
-To show phone battery information:
-
-1. Install the Termux:API companion Android app from the same source as your Termux installation.
-2. In Termux run:
-
-       pkg install termux-api
-
-3. Restart Desk Buddy.
-
-The battery command used by the MVP is termux-battery-status.
+    desk-buddy
 
 ## Weather
 
-Allow location access when your browser asks for it.
+For automatic phone location, install the Termux:API Android companion app and then:
 
-The browser provides latitude and longitude to the local Desk Buddy server. The server uses them for the current Open-Meteo request. Desk Buddy does not save the coordinates.
+    pkg install termux-api
 
-## Useful commands
+Desk Buddy will use `termux-location`.
 
-Start without automatically opening the browser:
+If you do not want Termux:API location, save a city manually:
 
-    desk-buddy --no-open
+    desk-buddy --set-city "Your City"
 
-Use another local port:
+Then launch normally:
 
-    DESK_BUDDY_PORT=9000 desk-buddy
+    desk-buddy
 
-Then open:
+Weather data comes from Open-Meteo.
 
-    http://127.0.0.1:9000
+## Battery
 
-## Current architecture
+Battery reactions use:
 
-    Termux
-      |
-      |-- start.sh
-      |-- server.py
-      |     |-- /api/health
-      |     |-- /api/weather
-      |     |-- /api/battery
-      |
-      |-- web/
-            |-- index.html
-            |-- styles.css
-            |-- app.js
-      |
-      |-- Android browser
+    termux-battery-status
 
-## Next upgrades
+This requires the Termux:API companion app plus:
 
-The current branch is intentionally an MVP foundation. Useful next upgrades include:
+    pkg install termux-api
 
-1. Charging and low-battery animations
-2. Android notification reactions
-3. Reminder and timer actions
-4. Sound packs
-5. Voice commands
-6. Configurable personality
-7. Optional LLM integration
-8. Wake-lock or kiosk-style always-on mode
+Without Termux:API the Desk Buddy still runs. Battery and automatic location are simply unavailable.
+
+## Architecture
+
+    Android phone
+        |
+        |-- Termux
+             |
+             |-- desk_buddy.py
+             |     |-- animated terminal face
+             |     |-- time
+             |     |-- weather
+             |     |-- battery reactions
+             |
+             |-- start.sh
+             |-- install.sh
+
+There is no HTTP server, browser UI, HTML, CSS or JavaScript in the active implementation.
+
+## Next phase
+
+The direct-Termux version is the compatibility-first base. A later visual upgrade can use Termux:GUI for a native Android activity with smoother graphical eyes while keeping Termux as the engine.
