@@ -14,6 +14,15 @@ if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; 
   pkg install python -y
 fi
 
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  PYTHON_BIN="python3"
+fi
+
+echo "Checking Desk Buddy server..."
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/server.py"
+
 chmod +x "$PROJECT_DIR/start.sh"
 
 LAUNCHER="$PREFIX/bin/desk-buddy"
