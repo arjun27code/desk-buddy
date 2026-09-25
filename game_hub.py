@@ -50,6 +50,7 @@ class GameHub:
 
         self.touch_down_x = 0.0
         self.touch_down_y = 0.0
+        self.pending_action = ""
 
         self.ttt_board = [""] * 9
         self.ttt_done = False
@@ -82,6 +83,11 @@ class GameHub:
         if current > self.caption_until:
             return ""
         return self.caption_text
+
+    def consume_action(self) -> str:
+        action = self.pending_action
+        self.pending_action = ""
+        return action
 
     def status_label(self) -> str:
         labels = {
@@ -226,6 +232,7 @@ class GameHub:
                         "Playing your OLED animation.",
                         3.0,
                     )
+                    self.pending_action = "oled_show"
                     return "oled_show"
             return None
 
