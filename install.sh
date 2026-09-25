@@ -21,6 +21,7 @@ fi
 
 echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gui_buddy.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/buddy_advanced.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
 echo "Installing Termux:GUI Python binding..."
@@ -52,5 +53,5 @@ echo "  desk-buddy --terminal"
 echo
 echo "IMPORTANT:"
 echo "Native graphics require the Termux:GUI Android plugin app."
-echo "Shake + tilt reactions require the Termux:API Android plugin app."
+echo "Shake + tilt + speech require the Termux:API Android plugin app."
 echo "Install both plugins from the SAME source as your Termux app."
