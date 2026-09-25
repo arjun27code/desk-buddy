@@ -22,14 +22,32 @@ fi
 echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gui_buddy.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/buddy_advanced.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gibber_voice.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/camera_vision.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/doodle_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
 
 echo "Installing Termux:GUI Python binding..."
 "$PYTHON_BIN" -m pip install --upgrade termuxgui
 
 if ! command -v termux-sensor >/dev/null 2>&1; then
-  echo "Installing Termux:API command package for motion sensors..."
+  echo "Installing Termux:API command package for sensors, camera and audio..."
   pkg install termux-api -y
+fi
+
+if ! "$PYTHON_BIN" -c "import cv2, numpy" >/dev/null 2>&1; then
+  echo "Installing local OpenCV vision support..."
+  pkg install x11-repo -y
+
+  if ! pkg install opencv-python python-numpy -y; then
+    echo
+    echo "WARNING: OpenCV could not be installed automatically."
+    echo "Desk Buddy will still run, but camera face/hand tracking will stay disabled."
+    echo "You can retry later with:"
+    echo "  pkg install x11-repo"
+    echo "  pkg install opencv-python python-numpy"
+    echo
+  fi
 fi
 
 LAUNCHER="$PREFIX/bin/desk-buddy"
@@ -53,5 +71,6 @@ echo "  desk-buddy --terminal"
 echo
 echo "IMPORTANT:"
 echo "Native graphics require the Termux:GUI Android plugin app."
-echo "Shake + tilt + speech require the Termux:API Android plugin app."
+echo "Shake + tilt + camera + gibber audio require the Termux:API Android plugin app."
 echo "Install both plugins from the SAME source as your Termux app."
+echo "The first camera run may ask for Android camera permission."
