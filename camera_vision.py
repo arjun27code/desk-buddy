@@ -30,6 +30,8 @@ class VisionState:
     stationary_seconds: float = 0.0
     five_fingers: bool = False
     right_hand_five_fingers: bool = False
+    right_hand_candidate: bool = False
+    finger_count: int = 0
     open_palm_confidence: float = 0.0
     hand_x: float = 0.0
     hand_y: float = 0.0
@@ -72,6 +74,7 @@ class CameraVision:
         self.five_event_pending = False
         self.right_five_event_pending = False
         self.bored_event_pending = False
+        self.fast_scan_until = 0.0
 
         self.face_detector = None
         if cv2 is not None:
@@ -245,7 +248,19 @@ class CameraVision:
                         pass
 
             elapsed = time.monotonic() - started
-            self.stop_event.wait(max(0.08, self.interval - elapsed))
+
+            # Default cadence stays modest because termux-camera-photo opens
+            # the Android camera for every JPEG. When a possible right-hand
+            # palm appears, temporarily enter a faster confirmation burst so
+            # the gesture does not require holding a pose forever.
+            target_interval = (
+                0.62
+                if time.monotonic() < self.fast_scan_until
+                else self.interval
+            )
+            self.stop_event.wait(
+                max(0.06, target_interval - elapsed)
+            )
 
     def _set_error(self, message: str) -> None:
         with self.lock:
@@ -255,7 +270,10 @@ class CameraVision:
     def _analyze(self, frame) -> None:
         now = time.monotonic()
 
-        max_width = 480
+        # Face/hand geometry does not need the full 3 MP JPEG. Reducing the
+        # analysis frame before Haar/contour work removes a large chunk of CPU
+        # pressure on the phone.
+        max_width = 360
         height, width = frame.shape[:2]
 
         if width > max_width:
@@ -274,8 +292,8 @@ class CameraVision:
         # Small mirrored front-camera preview. Store RGBA bytes in the shared
         # state so the native pixel canvas can alpha-blend it directly without
         # depending on unsupported Termux:GUI absolute-position APIs.
-        preview_max_w = 96
-        preview_max_h = 128
+        preview_max_w = 84
+        preview_max_h = 112
         preview_scale = min(
             preview_max_w / float(width),
             preview_max_h / float(height),
@@ -350,13 +368,25 @@ class CameraVision:
 
         five_fingers = (
             fingers >= 5
-            and palm_confidence >= 0.48
+            and palm_confidence >= 0.40
+        )
+
+        right_hand_candidate = (
+            right_hand
+            and fingers >= 4
+            and palm_confidence >= 0.28
         )
 
         right_hand_five = (
             five_fingers
             and right_hand
         )
+
+        if right_hand_candidate:
+            self.fast_scan_until = max(
+                self.fast_scan_until,
+                now + 3.2,
+            )
 
         if five_fingers:
             self.five_streak += 1
@@ -403,6 +433,8 @@ class CameraVision:
                 stationary_seconds=stationary_seconds,
                 five_fingers=five_fingers,
                 right_hand_five_fingers=right_hand_five,
+                right_hand_candidate=right_hand_candidate,
+                finger_count=fingers,
                 open_palm_confidence=palm_confidence,
                 hand_x=hand_x,
                 hand_y=hand_y,
@@ -476,26 +508,63 @@ class CameraVision:
 
         image = cv2.GaussianBlur(
             frame,
-            (5, 5),
+            (3, 3),
             0,
         )
+
         ycrcb = cv2.cvtColor(
             image,
             cv2.COLOR_BGR2YCrCb,
         )
+        hsv = cv2.cvtColor(
+            image,
+            cv2.COLOR_BGR2HSV,
+        )
 
-        lower = np.array(
-            [24, 125, 70],
-            dtype=np.uint8,
-        )
-        upper = np.array(
-            [255, 190, 148],
-            dtype=np.uint8,
-        )
-        mask = cv2.inRange(
+        # Two broad skin masks survive warm/cool room lighting better than the
+        # earlier single YCrCb window. The gesture still needs shape + position
+        # checks, so this does not by itself trigger a palm.
+        ycrcb_mask = cv2.inRange(
             ycrcb,
-            lower,
-            upper,
+            np.array(
+                [20, 120, 65],
+                dtype=np.uint8,
+            ),
+            np.array(
+                [255, 195, 155],
+                dtype=np.uint8,
+            ),
+        )
+
+        hsv_mask_a = cv2.inRange(
+            hsv,
+            np.array(
+                [0, 18, 28],
+                dtype=np.uint8,
+            ),
+            np.array(
+                [25, 190, 255],
+                dtype=np.uint8,
+            ),
+        )
+        hsv_mask_b = cv2.inRange(
+            hsv,
+            np.array(
+                [160, 18, 28],
+                dtype=np.uint8,
+            ),
+            np.array(
+                [179, 190, 255],
+                dtype=np.uint8,
+            ),
+        )
+
+        mask = cv2.bitwise_or(
+            ycrcb_mask,
+            cv2.bitwise_or(
+                hsv_mask_a,
+                hsv_mask_b,
+            ),
         )
 
         frame_h, frame_w = mask.shape[:2]
@@ -529,8 +598,11 @@ class CameraVision:
         else:
             face_center_x = frame_w / 2.0
 
+        # The old 5x5 double-close merged gaps between fingers, which is
+        # exactly the geometry convexity-defect counting needs. Preserve those
+        # valleys with a smaller kernel.
         kernel = np.ones(
-            (5, 5),
+            (3, 3),
             np.uint8,
         )
         mask = cv2.morphologyEx(
@@ -543,7 +615,7 @@ class CameraVision:
             mask,
             cv2.MORPH_CLOSE,
             kernel,
-            iterations=2,
+            iterations=1,
         )
 
         contours, _ = cv2.findContours(
@@ -562,7 +634,7 @@ class CameraVision:
         candidates = [
             contour
             for contour in contours
-            if 0.035 * frame_area
+            if 0.020 * frame_area
             <= cv2.contourArea(contour)
             <= 0.62 * frame_area
         ]
@@ -623,7 +695,7 @@ class CameraVision:
 
             depth_min = max(
                 7.0,
-                min(w, h) * 0.055,
+                min(w, h) * 0.042,
             )
 
             valid_defects = 0
@@ -675,7 +747,7 @@ class CameraVision:
                 depth = depth_raw / 256.0
 
                 if (
-                    angle <= 95.0
+                    angle <= 105.0
                     and depth >= depth_min
                 ):
                     valid_defects += 1
@@ -694,8 +766,8 @@ class CameraVision:
             )
             confidence = min(
                 1.0,
-                relative_area * 5.0
-                + valid_defects * 0.12
+                relative_area * 4.2
+                + valid_defects * 0.15
                 + max(
                     0.0,
                     0.88 - solidity,
@@ -708,10 +780,21 @@ class CameraVision:
 
             elif (
                 valid_defects >= 3
-                and h >= w * 0.82
-                and relative_area >= 0.045
-                and solidity <= 0.88
+                and h >= w * 0.70
+                and relative_area >= 0.025
+                and solidity <= 0.90
             ):
+                fingers = 5
+
+            elif (
+                valid_defects >= 2
+                and h >= w * 0.92
+                and relative_area >= 0.040
+                and solidity <= 0.80
+            ):
+                # Low-light snapshots sometimes merge one finger valley. This
+                # stricter fallback still describes a tall, spread palm rather
+                # than an ordinary forearm blob.
                 fingers = 5
 
             hand_x = max(
