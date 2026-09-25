@@ -2158,6 +2158,16 @@ class RoboEyesFace:
         radius_l = max(1.0, radius_l + hand_radius)
         radius_r = max(1.0, radius_r - hand_radius * 0.45)
 
+        if self.scenes.current == "peek" and s.mood_name == "idle":
+            # Push the complete pair beyond the virtual OLED edge so part of
+            # the face is physically clipped by the phone screen. It reads as
+            # Buddy leaning out of the display rather than merely looking left.
+            peek_shift = self.scenes.peek_side * 19.0
+            lx += peek_shift
+            rx += peek_shift
+            ly += math.sin(now * 3.0) * 0.8
+            ry -= math.sin(now * 3.0) * 0.35
+
         tilt_shift_x = s.tilt_x * 4.0
         tilt_shift_y = s.tilt_y * 2.5
         roll = s.tilt_x * 3.0
