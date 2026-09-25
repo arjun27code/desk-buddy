@@ -56,6 +56,7 @@ class CameraVision:
 
         self.face_history: deque[tuple[float, float, float]] = deque(maxlen=42)
         self.face_first_seen = 0.0
+        self.last_face_at = 0.0
         self.last_bored_event = 0.0
 
         self.five_streak = 0
@@ -273,8 +274,11 @@ class CameraVision:
             if self.face_first_seen <= 0.0:
                 self.face_first_seen = now
 
+            self.last_face_at = now
             self.face_history.append((now, face_x, face_y))
-        else:
+        elif now - self.last_face_at > 2.8:
+            # Haar detection can miss a single low-light snapshot. Do not reset
+            # the boredom timer because of one bad frame.
             self.face_first_seen = 0.0
             self.face_history.clear()
 
