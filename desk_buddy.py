@@ -18,6 +18,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 APP_NAME = "DESK BUDDY"
+EMOTION_HOLD_SECONDS = 2.5
+EMOTION_CYCLE = ["happy", "curious", "annoyed", "sad"]
 CONFIG_DIR = Path.home() / ".config" / "desk-buddy"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -83,6 +85,16 @@ MESSAGES = {
         "processing desk mysteries",
         "serious robot business",
     ],
+    "curious": [
+        "curiosity mode",
+        "what is that",
+        "checking the corner",
+    ],
+    "annoyed": [
+        "mildly unimpressed",
+        "robot patience reduced",
+        "tiny horizontal complaint",
+    ],
     "sad": [
         "rain mood",
         "small weather disappointment",
@@ -144,6 +156,7 @@ class State:
     pending_double_blink: bool = False
 
     eye_color_index: int = 0
+    emotion_cycle_index: int = 0
 
     next_message: float = 0.0
     hint_until: float = 0.0
@@ -508,22 +521,34 @@ def update_motion(state: State, now: float) -> None:
     if not state.blinking and now >= state.next_blink:
         trigger_blink(state, now)
 
-    if now >= state.next_gaze and not state.blinking:
+    if state.mood == "curious":
+        state.target_gaze_x = 0.78
+        state.target_gaze_y = -0.62
+    elif state.mood == "sad":
+        state.target_gaze_x = 0.0
+        state.target_gaze_y = 0.78
+    elif state.mood == "annoyed":
+        state.target_gaze_x = -0.15
+        state.target_gaze_y = 0.0
+    elif state.mood in {"happy", "love"}:
+        state.target_gaze_x = 0.0
+        state.target_gaze_y = -0.10
+    elif now >= state.next_gaze and not state.blinking:
         choices = [
             (0.0, 0.0),
             (0.0, 0.0),
             (0.0, 0.0),
-            (-0.7, 0.0),
-            (0.7, 0.0),
-            (-0.55, -0.45),
-            (0.55, -0.45),
-            (-0.45, 0.45),
-            (0.45, 0.45),
+            (-0.78, 0.0),
+            (0.78, 0.0),
+            (-0.60, -0.55),
+            (0.60, -0.55),
+            (-0.50, 0.50),
+            (0.50, 0.50),
         ]
         state.target_gaze_x, state.target_gaze_y = random.choice(choices)
-        state.next_gaze = now + random.uniform(0.55, 2.8)
+        state.next_gaze = now + random.uniform(0.5, 3.0)
 
-    ease = 0.22
+    ease = 0.18 if state.mood == "idle" else 0.28
     state.gaze_x += (state.target_gaze_x - state.gaze_x) * ease
     state.gaze_y += (state.target_gaze_y - state.gaze_y) * ease
 
@@ -554,6 +579,12 @@ def eye_geometry(
         base_h = min(13, base_h + 2)
     elif state.mood == "suspicious":
         base_h = max(4, base_h - 2)
+    elif state.mood == "sad":
+        base_h = max(4, base_h - 2)
+    elif state.mood == "annoyed":
+        base_h = max(4, base_h - 2)
+    elif state.mood == "curious":
+        eye_w = min(24, eye_w + 1)
 
     open_ratio = blink_open_ratio(state, now)
     draw_h = max(1, int(round(base_h * open_ratio)))
@@ -580,6 +611,14 @@ def draw_face(
         return
 
     start_x, start_y, eye_w, eye_h, gap = eye_geometry(screen, state, now)
+
+    if state.mood == "happy":
+        start_y += int(round(math.sin(now * 14.0) * 1.2))
+    elif state.mood == "annoyed":
+        start_x += int(round(math.sin(now * 26.0) * 1.5))
+    elif state.mood == "sad":
+        start_y += 1
+
     right_x = start_x + eye_w + gap
 
     eye_attr = colors["eye_fills"][state.eye_color_index]
@@ -599,7 +638,7 @@ def draw_face(
     top_mask_right = None
     bottom_mask = state.mood == "happy"
 
-    if state.mood == "focused":
+    if state.mood in {"focused", "annoyed"}:
         top_mask_left = "left_down"
         top_mask_right = "right_down"
     elif state.mood == "sad":
@@ -721,7 +760,7 @@ def draw_ui(
 def set_mood(
     state: State,
     mood: str,
-    duration: float = 3.0,
+    duration: float = EMOTION_HOLD_SECONDS,
     message: str | None = None,
 ) -> None:
     state.mood = mood
@@ -839,7 +878,7 @@ def main_loop(screen: curses.window, city: str | None, config: dict[str, Any]) -
 
     screen.nodelay(True)
     screen.keypad(True)
-    screen.timeout(33)
+    screen.timeout(16)
 
     colors = init_colors()
     now = time.monotonic()
@@ -894,19 +933,29 @@ def main_loop(screen: curses.window, city: str | None, config: dict[str, Any]) -
             break
 
         if key in (ord("b"), ord("B")):
-            set_mood(
-                state,
-                random.choice(["happy", "love", "excited"]),
-                3.3,
-            )
+            mood = EMOTION_CYCLE[state.emotion_cycle_index]
+            state.emotion_cycle_index = (
+                state.emotion_cycle_index + 1
+            ) % len(EMOTION_CYCLE)
+            set_mood(state, mood, EMOTION_HOLD_SECONDS)
             state.hint_until = max(state.hint_until, now + 2.0)
         elif key == ord(" "):
             set_mood(
                 state,
                 random.choice(
-                    ["happy", "love", "excited", "surprised", "focused", "suspicious"]
+                    [
+                        "happy",
+                        "love",
+                        "excited",
+                        "surprised",
+                        "focused",
+                        "suspicious",
+                        "curious",
+                        "annoyed",
+                        "sad",
+                    ]
                 ),
-                3.2,
+                EMOTION_HOLD_SECONDS,
             )
         elif key in (ord("s"), ord("S")):
             set_mood(state, "sleepy", 8.0)
