@@ -21,6 +21,12 @@ from buddy_advanced import (
 )
 from camera_vision import CameraVision
 from doodle_show import DoodleShow
+from oled_asset_show import OledAssetShow
+
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 try:
     import termuxgui as tg
@@ -147,6 +153,147 @@ class PixelCanvas:
 
     def clear(self) -> None:
         self.mem[:] = self._black
+
+    def blend_rgba(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        rgba: bytes,
+        alpha: float = 0.40,
+    ) -> None:
+        """Alpha-blend a small RGBA image into the native pixel buffer."""
+
+        if (
+            width <= 0
+            or height <= 0
+            or not rgba
+        ):
+            return
+
+        x = int(x)
+        y = int(y)
+        alpha = clamp(alpha, 0.0, 1.0)
+
+        dst_x1 = max(0, x)
+        dst_y1 = max(0, y)
+        dst_x2 = min(self.width, x + width)
+        dst_y2 = min(self.height, y + height)
+
+        if dst_x2 <= dst_x1 or dst_y2 <= dst_y1:
+            return
+
+        src_x1 = dst_x1 - x
+        src_y1 = dst_y1 - y
+        src_x2 = src_x1 + (dst_x2 - dst_x1)
+        src_y2 = src_y1 + (dst_y2 - dst_y1)
+
+        if np is not None:
+            try:
+                src = np.frombuffer(
+                    rgba,
+                    dtype=np.uint8,
+                ).reshape(
+                    height,
+                    width,
+                    4,
+                )
+
+                dst = np.frombuffer(
+                    self.mem,
+                    dtype=np.uint8,
+                ).reshape(
+                    self.height,
+                    self.width,
+                    4,
+                )
+
+                src_region = src[
+                    src_y1:src_y2,
+                    src_x1:src_x2,
+                    :3,
+                ].astype(
+                    np.float32,
+                )
+
+                dst_region = dst[
+                    dst_y1:dst_y2,
+                    dst_x1:dst_x2,
+                    :3,
+                ].astype(
+                    np.float32,
+                )
+
+                blended = (
+                    dst_region * (1.0 - alpha)
+                    + src_region * alpha
+                )
+
+                dst[
+                    dst_y1:dst_y2,
+                    dst_x1:dst_x2,
+                    :3,
+                ] = blended.astype(
+                    np.uint8,
+                )
+                dst[
+                    dst_y1:dst_y2,
+                    dst_x1:dst_x2,
+                    3,
+                ] = 255
+                return
+
+            except Exception:
+                pass
+
+        # Small pure-Python fallback if numpy cannot expose the Termux buffer.
+        source = memoryview(rgba)
+        destination = self.mem
+
+        for row in range(
+            dst_y2 - dst_y1
+        ):
+            source_y = src_y1 + row
+            destination_y = dst_y1 + row
+
+            for column in range(
+                dst_x2 - dst_x1
+            ):
+                source_x = src_x1 + column
+                destination_x = dst_x1 + column
+
+                source_offset = (
+                    source_y * width
+                    + source_x
+                ) * 4
+
+                destination_offset = (
+                    destination_y * self.width
+                    + destination_x
+                ) * 4
+
+                for channel in range(3):
+                    old = destination[
+                        destination_offset
+                        + channel
+                    ]
+                    new = source[
+                        source_offset
+                        + channel
+                    ]
+
+                    destination[
+                        destination_offset
+                        + channel
+                    ] = int(
+                        old * (1.0 - alpha)
+                        + new * alpha
+                    )
+
+                destination[
+                    destination_offset + 3
+                ] = 255
 
     @staticmethod
     def _px(color: tuple[int, int, int, int]) -> bytes:
