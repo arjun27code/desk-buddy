@@ -1174,7 +1174,8 @@ class RoboEyesFace:
             self.set_mood("default")
             self.set_position("DEFAULT")
             s.idle = True
-            s.curious = True
+            s.curious = False
+            s.cosmo_glance_until = 0.0
             s.next_auto_emotion = now + random.uniform(7.0, 17.0)
             return
 
@@ -1614,15 +1615,55 @@ class RoboEyesFace:
             s.next_blink = self._next_blink(now)
 
         if (
+            s.cosmo_glance_until > 0.0
+            and now >= s.cosmo_glance_until
+            and s.manual_until == 0.0
+            and not self.scenes.current
+        ):
+            s.cosmo_glance_until = 0.0
+            s.eye_l_x_next = COSMO_LEFT_X
+            s.eye_l_y_next = COSMO_EYE_Y
+
+        if (
             s.idle
             and s.manual_until == 0.0
             and now >= s.next_idle
+            and not self.scenes.current
         ):
-            max_x = max(1, int(self._constraint_x()))
-            max_y = max(1, int(self._constraint_y()))
-            s.eye_l_x_next = float(random.randrange(max_x))
-            s.eye_l_y_next = float(random.randrange(max_y))
-            s.next_idle = self._next_idle(now)
+            glance = random.randrange(4)
+
+            if glance == 0:
+                dx, dy = -15.0, 0.0
+            elif glance == 1:
+                dx, dy = 15.0, 0.0
+            elif glance == 2:
+                dx, dy = 0.0, -8.0
+            else:
+                dx, dy = 0.0, 0.0
+
+            s.eye_l_x_next = clamp(
+                COSMO_LEFT_X + dx,
+                0.0,
+                self._constraint_x(),
+            )
+            s.eye_l_y_next = clamp(
+                COSMO_EYE_Y + dy,
+                0.0,
+                self._constraint_y(),
+            )
+
+            if dx or dy:
+                s.cosmo_glance_until = now + random.uniform(
+                    0.18,
+                    0.28,
+                )
+            else:
+                s.cosmo_glance_until = 0.0
+
+            s.next_idle = now + random.uniform(
+                0.72,
+                1.18,
+            )
 
         transition = self._transition_progress(now)
 
