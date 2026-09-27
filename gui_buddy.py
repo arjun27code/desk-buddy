@@ -1148,10 +1148,14 @@ class RoboEyesFace:
             "happy": 0.65,
             "curious": 0.90,
             "annoyed": 0.55,
+            "angry": 0.35,
             "sad": 1.05,
-            "surprised": 0.40,
-            "sleepy": 1.25,
-            "love": 0.70,
+            "surprised": 0.30,
+            "sleepy": 0.45,
+            "wink": 0.25,
+            "lookleft": 0.20,
+            "lookright": 0.20,
+            "love": 0.35,
             "excited": 0.45,
             "dizzy": 0.30,
             "shy": 1.00,
@@ -1203,6 +1207,12 @@ class RoboEyesFace:
             s.h_flicker = True
             s.h_flicker_amp = 2.0
 
+        elif mood == "angry":
+            self.set_mood("angry")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+
         elif mood == "sad":
             self.set_mood("tired")
             self.set_position("S")
@@ -1229,6 +1239,24 @@ class RoboEyesFace:
             s.curious = False
             s.eye_l_h_next = 24.0
             s.eye_r_h_next = 24.0
+
+        elif mood == "wink":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+
+        elif mood == "lookleft":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
+
+        elif mood == "lookright":
+            self.set_mood("default")
+            self.set_position("DEFAULT")
+            s.idle = False
+            s.curious = False
 
         elif mood == "love":
             self.set_mood("default")
