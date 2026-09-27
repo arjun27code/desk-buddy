@@ -2153,8 +2153,12 @@ class RoboEyesFace:
                 s.eye_l_x
                 - COSMO_LEFT_X
             )
+            # Use the gaze target for vertical offset because the legacy
+            # state also shifts eye_y while closing a blink. Cosmo's renderer
+            # already re-centers a shortened eye, so using the current eye_y
+            # here would double-apply that vertical compensation.
             cosmo_offset_y = (
-                s.eye_l_y
+                s.eye_l_y_next
                 - COSMO_EYE_Y
             )
 
@@ -2178,7 +2182,7 @@ class RoboEyesFace:
                 idle_right_h=s.eye_r_h,
                 tilt_x=s.tilt_x,
                 tilt_y=s.tilt_y,
-                color=CYAN,
+                color=WHITE,
                 black=BLACK,
             )
             return
