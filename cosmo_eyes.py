@@ -103,17 +103,21 @@ def _draw_heart(
     size: float,
     color=WHITE,
 ) -> None:
-    r = size / 3.0
+    # The source uses integer arithmetic here:
+    # int r = size / 3; then r / 2 and r / 3 also truncate.
+    r = float(int(size) // 3)
+    half_r = float(int(r) // 2)
+    third_r = float(int(r) // 3)
 
     oled.circle(
         cx - r,
-        cy - r / 2.0,
+        cy - half_r,
         r,
         color,
     )
     oled.circle(
         cx + r,
-        cy - r / 2.0,
+        cy - half_r,
         r,
         color,
     )
@@ -121,11 +125,11 @@ def _draw_heart(
         [
             (
                 cx - size,
-                cy - r / 3.0,
+                cy - third_r,
             ),
             (
                 cx + size,
-                cy - r / 3.0,
+                cy - third_r,
             ),
             (
                 cx,
@@ -309,8 +313,8 @@ def draw_cosmo(
             oled,
             offset_x=physical_x,
             offset_y=6 + physical_y,
-            left_h=EYE_HEIGHT / 3.0,
-            right_h=EYE_HEIGHT / 3.0,
+            left_h=float(EYE_HEIGHT // 3),
+            right_h=float(EYE_HEIGHT // 3),
             color=color,
         )
         return
