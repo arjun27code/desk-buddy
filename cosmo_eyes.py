@@ -491,6 +491,25 @@ def run_self_test() -> None:
     assert kinds.count("circle") == 4
     assert kinds.count("polygon") == 2
 
+    # Integer math in the original sketch makes size 16 -> radius 5,
+    # r/2 -> 2 and r/3 -> 1.
+    first_circle = oled.ops[0][1]
+    assert first_circle[:3] == (
+        36.0,
+        30.0,
+        5.0,
+    )
+
+    oled = _FakeOLED()
+    draw_cosmo(
+        oled,
+        mode="sleepy",
+        now=10.0,
+        mode_started=9.0,
+    )
+    assert oled.ops[0][1][3] == 13.0
+    assert oled.ops[1][1][3] == 13.0
+
     left = _FakeOLED()
     right = _FakeOLED()
     draw_cosmo(
