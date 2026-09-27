@@ -2148,6 +2148,41 @@ class RoboEyesFace:
             dt,
         )
 
+        if s.mood_name in COSMO_MODES:
+            cosmo_offset_x = (
+                s.eye_l_x
+                - COSMO_LEFT_X
+            )
+            cosmo_offset_y = (
+                s.eye_l_y
+                - COSMO_EYE_Y
+            )
+
+            if (
+                s.mood_name == "idle"
+                and self.scenes.current == "peek"
+            ):
+                cosmo_offset_x += (
+                    self.scenes.peek_side
+                    * 19.0
+                )
+
+            draw_cosmo(
+                oled,
+                mode=s.mood_name,
+                now=now,
+                mode_started=s.mood_started,
+                idle_offset_x=cosmo_offset_x,
+                idle_offset_y=cosmo_offset_y,
+                idle_left_h=s.eye_l_h,
+                idle_right_h=s.eye_r_h,
+                tilt_x=s.tilt_x,
+                tilt_y=s.tilt_y,
+                color=CYAN,
+                black=BLACK,
+            )
+            return
+
         lx = s.eye_l_x
         ly = s.eye_l_y
         rx = s.eye_r_x
