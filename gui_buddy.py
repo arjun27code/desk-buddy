@@ -917,39 +917,40 @@ class EmotionEffects:
 
 @dataclass
 class RoboState:
-    eye_l_w_default: float = 36.0
-    eye_l_h_default: float = 36.0
-    eye_r_w_default: float = 36.0
-    eye_r_h_default: float = 36.0
-    radius_l_default: float = 8.0
-    radius_r_default: float = 8.0
-    space_default: float = 10.0
+    # Exact base geometry from CosmoEyesKeyChainProject.md.
+    eye_l_w_default: float = 34.0
+    eye_l_h_default: float = 40.0
+    eye_r_w_default: float = 34.0
+    eye_r_h_default: float = 40.0
+    radius_l_default: float = 10.0
+    radius_r_default: float = 10.0
+    space_default: float = 12.0
 
-    eye_l_w: float = 36.0
+    eye_l_w: float = 34.0
     eye_l_h: float = 1.0
-    eye_r_w: float = 36.0
+    eye_r_w: float = 34.0
     eye_r_h: float = 1.0
-    eye_l_w_next: float = 36.0
-    eye_l_h_next: float = 36.0
-    eye_r_w_next: float = 36.0
-    eye_r_h_next: float = 36.0
+    eye_l_w_next: float = 34.0
+    eye_l_h_next: float = 40.0
+    eye_r_w_next: float = 34.0
+    eye_r_h_next: float = 40.0
 
-    radius_l: float = 8.0
-    radius_r: float = 8.0
-    radius_l_next: float = 8.0
-    radius_r_next: float = 8.0
+    radius_l: float = 10.0
+    radius_r: float = 10.0
+    radius_l_next: float = 10.0
+    radius_r_next: float = 10.0
 
-    space: float = 10.0
-    space_next: float = 10.0
+    space: float = 12.0
+    space_next: float = 12.0
 
-    eye_l_x: float = 23.0
-    eye_l_y: float = 14.0
-    eye_r_x: float = 69.0
-    eye_r_y: float = 14.0
-    eye_l_x_next: float = 23.0
-    eye_l_y_next: float = 14.0
-    eye_r_x_next: float = 69.0
-    eye_r_y_next: float = 14.0
+    eye_l_x: float = 24.0
+    eye_l_y: float = 12.0
+    eye_r_x: float = 70.0
+    eye_r_y: float = 12.0
+    eye_l_x_next: float = 24.0
+    eye_l_y_next: float = 12.0
+    eye_r_x_next: float = 70.0
+    eye_r_y_next: float = 12.0
 
     eye_l_h_offset: float = 0.0
     eye_r_h_offset: float = 0.0
@@ -1016,6 +1017,7 @@ class RoboState:
     tap_streak: int = 0
     tap_pending: bool = False
     tap_pending_until: float = 0.0
+    cosmo_glance_until: float = 0.0
 
     touch_down_at: float = 0.0
     touch_down_x: float = 0.0
