@@ -23,10 +23,14 @@ echo "Checking Desk Buddy Python files..."
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gui_buddy.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/buddy_advanced.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/gibber_voice.py"
+"$PYTHON_BIN" -m py_compile "$PROJECT_DIR/cosmo_eyes.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/game_hub.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/doodle_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/oled_asset_show.py"
 "$PYTHON_BIN" -m py_compile "$PROJECT_DIR/desk_buddy.py"
+
+echo "Running Cosmo eye geometry self-test..."
+"$PYTHON_BIN" "$PROJECT_DIR/cosmo_eyes.py" --self-test
 
 echo "Running Game Hub logic self-test..."
 "$PYTHON_BIN" "$PROJECT_DIR/game_hub.py" --self-test
@@ -65,8 +69,12 @@ echo "IMPORTANT:"
 echo "Native graphics require the Termux:GUI Android plugin app."
 echo "Shake + tilt + gibber audio require the Termux:API Android plugin app."
 echo "Install both plugins from the SAME source as your Termux app."
+echo "Controls:"
+echo "  Single tap: cycle expressions."
+echo "  Double-tap: open Game Hub."
+echo "  Hold about 1 second: sleep."
+echo "  Tap while sleeping: wake."
 echo "Games:"
-echo "  Double-tap or long-press the face to open Game Hub."
 echo "  Includes Tic-Tac-Toe vs Buddy, Pong vs Buddy, Snake, and OLED Show."
 echo
 echo "Optional OLED show asset:"
