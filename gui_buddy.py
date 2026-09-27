@@ -971,13 +971,13 @@ class RoboState:
     eye_r_open: bool = False
 
     autoblink: bool = True
-    blink_interval: int = 3
-    blink_variation: int = 2
+    blink_interval: int = 1
+    blink_variation: int = 1
     next_blink: float = 0.0
 
     idle: bool = True
-    idle_interval: int = 2
-    idle_variation: int = 2
+    idle_interval: int = 1
+    idle_variation: int = 1
     next_idle: float = 0.0
 
     h_flicker: bool = False
@@ -1447,10 +1447,11 @@ class RoboEyesFace:
                 s.last_tap_at = now
                 return None
 
-            if duration >= 0.80 and distance <= 34.0:
+            if duration >= 1.00 and distance <= 34.0:
                 s.tap_pending = False
                 s.tap_pending_until = 0.0
-                return "games"
+                self.go_to_sleep()
+                return None
 
             if s.mood_name == "idle":
                 s.idle = True
