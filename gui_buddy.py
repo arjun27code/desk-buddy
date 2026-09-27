@@ -19,6 +19,16 @@ from buddy_advanced import (
     discover_sensor_request,
     time_label,
 )
+from cosmo_eyes import (
+    COSMO_MODES,
+    EYE_HEIGHT as COSMO_EYE_HEIGHT,
+    EYE_WIDTH as COSMO_EYE_WIDTH,
+    EYE_RADIUS as COSMO_EYE_RADIUS,
+    EYE_GAP as COSMO_EYE_GAP,
+    LEFT_X as COSMO_LEFT_X,
+    EYE_Y as COSMO_EYE_Y,
+    draw_cosmo,
+)
 from game_hub import GameHub
 from oled_asset_show import OledAssetShow
 
@@ -48,12 +58,15 @@ EMOTION_HOLD = 5.5
 DIZZY_HOLD = 6.0
 EMOTION_CYCLE = [
     "happy",
-    "curious",
-    "annoyed",
-    "sad",
     "surprised",
+    "angry",
     "sleepy",
+    "wink",
     "love",
+    "lookleft",
+    "lookright",
+    "curious",
+    "sad",
     "excited",
     "shy",
     "confused",
